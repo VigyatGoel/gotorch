@@ -6,6 +6,19 @@
 
 GoTorch is a deep learning framework implemented in pure Go, designed for simplicity and educational purposes. It provides the essential building blocks for creating and training neural networks without external dependencies.
 
+## Table of Contents
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Examples](#examples)
+- [Customization](#customization)
+- [Documentation](#documentation)
+- [Limitations](#limitations)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+
 ## Features
 
 - **Pure Go Implementation**: No external C/C++ dependencies or bindings
@@ -13,6 +26,7 @@ GoTorch is a deep learning framework implemented in pure Go, designed for simpli
   - Linear (Dense) layers
   - Activation functions (ReLU, Sigmoid, Softmax)
   - Loss functions (Cross-Entropy, MSE)
+  - Optimizers: SGD(with momentum) and Adam supported
   - Sequential model architecture
 - **Data Processing**:
   - CSV data loading with automatic feature extraction
