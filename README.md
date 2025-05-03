@@ -1,6 +1,7 @@
 # GoTorch
 
 [![Go Version](https://img.shields.io/badge/Go-1.24-blue.svg)](https://go.dev/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/VigyatGoel/gotorch.svg)](https://pkg.go.dev/github.com/VigyatGoel/gotorch)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 GoTorch is a deep learning framework implemented in pure Go, designed for simplicity and educational purposes. It provides the essential building blocks for creating and training neural networks without external dependencies.
