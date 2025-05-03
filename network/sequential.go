@@ -1,7 +1,7 @@
 package network
 
 import (
-	layer "github.com/VigyatGoel/gotorch/src/layers"
+	layer "github.com/VigyatGoel/gotorch/layers"
 )
 
 type Sequential struct {

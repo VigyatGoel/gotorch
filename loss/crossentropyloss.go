@@ -1,7 +1,7 @@
 package loss
 
 import (
-	"github.com/VigyatGoel/gotorch/src/utils"
+	"github.com/VigyatGoel/gotorch/utils"
 	"math"
 )
 

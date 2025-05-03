@@ -1,6 +1,6 @@
 package layer
 
-import "github.com/VigyatGoel/gotorch/src/utils"
+import "github.com/VigyatGoel/gotorch/utils"
 
 type Softmax struct {
 	Output [][]float64

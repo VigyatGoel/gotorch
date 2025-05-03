@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/VigyatGoel/gotorch/src/data"
-	layer "github.com/VigyatGoel/gotorch/src/layers"
-	"github.com/VigyatGoel/gotorch/src/loss"
-	"github.com/VigyatGoel/gotorch/src/network"
+	"github.com/VigyatGoel/gotorch/data"
+	layer "github.com/VigyatGoel/gotorch/layers"
+	"github.com/VigyatGoel/gotorch/loss"
+	"github.com/VigyatGoel/gotorch/network"
 )
 
 func main() {
-	dataLoader := data.NewDataLoader("src/cmd/iris.csv", data.Classification)
+	dataLoader := data.NewDataLoader("cmd/iris.csv", data.Classification)
 
 	err := dataLoader.Load()
 	if err != nil {
