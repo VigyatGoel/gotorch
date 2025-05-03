@@ -8,71 +8,94 @@ import (
 	layer "github.com/VigyatGoel/gotorch/layers"
 	"github.com/VigyatGoel/gotorch/loss"
 	"github.com/VigyatGoel/gotorch/network"
+	"github.com/VigyatGoel/gotorch/optimizer"
+)
+
+const (
+	BatchSize = 32
 )
 
 func main() {
-	dataLoader := data.NewDataLoader("cmd/iris.csv", data.Classification)
-
+	dataLoader := data.NewDataLoader("cmd/train.csv", data.Classification, BatchSize)
 	err := dataLoader.Load()
 	if err != nil {
 		log.Fatalf("Error loading data: %v", err)
 	}
 
+	dataLoader.NormalizeFeatures() 
+
+	numFeatures := dataLoader.NumFeatures()
+	if numFeatures == 0 {
+		log.Fatalf("Could not determine number of features from the data.")
+	}
+	fmt.Printf("Detected %d features from the dataset.\n", numFeatures)
+
 	x_train, y_train, x_test, y_test := dataLoader.Split()
 
-	model := network.NewSequential(
-		layer.NewLinear(4, 128),
+	model := createModel(numFeatures)
+	criterion := loss.NewCrossEntropyLoss()
+	epochs := 50
+
+	fmt.Println("\nTRAINING WITH ADAM")
+	adamOpt := optimizer.DefaultAdam(0.001)
+	model.SetOptimizer(adamOpt)
+	trainAndEvaluate(model, criterion, dataLoader, x_train, y_train, x_test, y_test, epochs)
+}
+
+func createModel(inputFeatures int) *network.Sequential {
+	return network.NewSequential(
+		layer.NewLinear(inputFeatures, 128),
 		layer.NewReLU(),
 		layer.NewLinear(128, 64),
 		layer.NewReLU(),
 		layer.NewLinear(64, 32),
+		layer.NewReLU(),
 		layer.NewLinear(32, 3),
 		layer.NewSoftmax(),
 	)
+}
 
-	criterion := loss.NewCrossEntropyLoss()
-
-	epochs := 100
-	lr := 0.01
-
+func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLoss,
+	dataLoader *data.DataLoader,
+	x_train, y_train, x_test, y_test [][]float64, epochs int) {
 	for epoch := 0; epoch < epochs; epoch++ {
-		preds := model.Forward(x_train)
+		epochLoss := 0.0
+		batches := dataLoader.GetBatches(x_train, y_train, epoch)
 
-		lossVal := criterion.Forward(preds, y_train)
+		for _, batch := range batches {
+			preds := model.Forward(batch.Features)
+			lossVal := criterion.Forward(preds, batch.Targets)
+			grad := criterion.Backward()
+			model.Backward(grad)
+			epochLoss += lossVal
+		}
 
-		grad := criterion.Backward()
-		model.Backward(grad, lr)
-
-		fmt.Printf("Epoch [%d/%d] Loss: %.4f\n", epoch+1, epochs, lossVal)
+		avgEpochLoss := epochLoss / float64(len(batches))
+		fmt.Printf("Epoch [%d/%d] Average Loss: %.4f\n", epoch+1, epochs, avgEpochLoss)
 	}
 
-	fmt.Println("\nModel Evaluation:")
 	preds := model.Predict(x_test)
-
 	correct := 0
 	for i := range x_test {
 		predictedClass := getMaxIndex(preds[i])
 		actualClass := getMaxIndex(y_test[i])
-
 		if predictedClass == actualClass {
 			correct++
 		}
 	}
 
 	accuracy := float64(correct) / float64(len(x_test)) * 100
-	fmt.Printf("\nAccuracy: %.2f%% (%d/%d)\n", accuracy, correct, len(x_test))
+	fmt.Printf("Accuracy: %.2f%% (%d/%d)\n", accuracy, correct, len(x_test))
 }
 
 func getMaxIndex(values []float64) int {
 	maxIndex := 0
 	maxVal := values[0]
-
 	for i, val := range values {
 		if val > maxVal {
 			maxVal = val
 			maxIndex = i
 		}
 	}
-
 	return maxIndex
 }

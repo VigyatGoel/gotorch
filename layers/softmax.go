@@ -15,6 +15,28 @@ func (s *Softmax) Forward(x [][]float64) [][]float64 {
 	return s.Output
 }
 
-func (s *Softmax) Backward(dout [][]float64, _ float64) [][]float64 {
-	return dout
+func (s *Softmax) Backward(gradOutput [][]float64) [][]float64 {
+	return gradOutput
+}
+
+func (s *Softmax) GetWeights() [][]float64 {
+	return nil
+}
+
+func (s *Softmax) GetGradients() [][]float64 {
+	return nil
+}
+
+func (s *Softmax) UpdateWeights(weightsUpdate [][]float64) {
+}
+
+func (s *Softmax) GetBiases() [][]float64 {
+	return nil
+}
+
+func (s *Softmax) GetBiasGradients() [][]float64 {
+	return nil
+}
+
+func (s *Softmax) UpdateBiases(biasUpdate [][]float64) {
 }

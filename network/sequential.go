@@ -2,16 +2,22 @@ package network
 
 import (
 	layer "github.com/VigyatGoel/gotorch/layers"
+	"github.com/VigyatGoel/gotorch/optimizer"
 )
 
 type Sequential struct {
-	Layers []layer.Layer
+	Layers    []layer.Layer
+	Optimizer optimizer.Optimizer
 }
 
 func NewSequential(layers ...layer.Layer) *Sequential {
 	return &Sequential{
 		Layers: layers,
 	}
+}
+
+func (s *Sequential) SetOptimizer(opt optimizer.Optimizer) {
+	s.Optimizer = opt
 }
 
 func (s *Sequential) Add(layer layer.Layer) {
@@ -26,10 +32,33 @@ func (s *Sequential) Forward(input [][]float64) [][]float64 {
 	return output
 }
 
-func (s *Sequential) Backward(gradOutput [][]float64, learningRate float64) [][]float64 {
+func (s *Sequential) Backward(gradOutput [][]float64) [][]float64 {
 	for i := len(s.Layers) - 1; i >= 0; i-- {
-		gradOutput = s.Layers[i].Backward(gradOutput, learningRate)
+		gradOutput = s.Layers[i].Backward(gradOutput)
 	}
+
+	if s.Optimizer != nil {
+		for _, l := range s.Layers {
+			weights := l.GetWeights()
+			gradients := l.GetGradients()
+			if weights != nil && gradients != nil && len(weights) > 0 && len(gradients) > 0 {
+				if len(weights) == len(gradients) && (len(weights) == 0 || len(weights[0]) == len(gradients[0])) {
+					updatedWeights := s.Optimizer.Step(weights, gradients)
+					l.UpdateWeights(updatedWeights)
+				}
+			}
+
+			biases := l.GetBiases()
+			biasGradients := l.GetBiasGradients()
+			if biases != nil && biasGradients != nil && len(biases) > 0 && len(biasGradients) > 0 {
+				if len(biases) == len(biasGradients) && len(biases[0]) == len(biasGradients[0]) {
+					updatedBiases := s.Optimizer.StepBias(biases, biasGradients)
+					l.UpdateBiases(updatedBiases)
+				}
+			}
+		}
+	}
+
 	return gradOutput
 }
 

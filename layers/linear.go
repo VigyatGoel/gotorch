@@ -1,16 +1,19 @@
 package layer
 
 import (
-	"github.com/VigyatGoel/gotorch/utils"
 	"math/rand"
+
+	"github.com/VigyatGoel/gotorch/utils"
 )
 
 var rng = rand.New(rand.NewSource(42))
 
 type Linear struct {
-	Input  [][]float64
-	Weight [][]float64
-	Bias   [][]float64
+	Input   [][]float64
+	Weight  [][]float64
+	Bias    [][]float64
+	dWeight [][]float64
+	dBias   [][]float64
 }
 
 func NewLinear(inFeautes, outFeatures int) *Linear {
@@ -25,9 +28,19 @@ func NewLinear(inFeautes, outFeatures int) *Linear {
 		}
 	}
 
+	dWeights := make([][]float64, inFeautes)
+	dBias := make([][]float64, 1)
+	dBias[0] = make([]float64, outFeatures)
+
+	for i := range dWeights {
+		dWeights[i] = make([]float64, outFeatures)
+	}
+
 	return &Linear{
-		Weight: weights,
-		Bias:   bias,
+		Weight:  weights,
+		Bias:    bias,
+		dWeight: dWeights,
+		dBias:   dBias,
 	}
 }
 
@@ -38,29 +51,44 @@ func (l *Linear) Forward(x [][]float64) [][]float64 {
 	return out
 }
 
-func (l *Linear) Backward(gradOutput [][]float64, lr float64) [][]float64 {
+func (l *Linear) Backward(gradOutput [][]float64) [][]float64 { // Removed lr
 	inputT := utils.Transpose(l.Input)
-	dWeight := utils.Dot(inputT, gradOutput)
+	l.dWeight = utils.Dot(inputT, gradOutput)
 
-	dBias := make([][]float64, 1)
-	dBias[0] = make([]float64, len(gradOutput[0]))
+	l.dBias = make([][]float64, 1)
+	l.dBias[0] = make([]float64, len(gradOutput[0]))
 	for i := range gradOutput {
 		for j := range gradOutput[0] {
-			dBias[0][j] += gradOutput[i][j]
+			l.dBias[0][j] += gradOutput[i][j]
 		}
 	}
 
 	weightT := utils.Transpose(l.Weight)
 	gradInput := utils.Dot(gradOutput, weightT)
 
-	for i := range l.Weight {
-		for j := range l.Weight[0] {
-			l.Weight[i][j] -= lr * dWeight[i][j]
-		}
-	}
-	for j := range l.Bias[0] {
-		l.Bias[0][j] -= lr * dBias[0][j]
-	}
-
 	return gradInput
+}
+
+func (l *Linear) GetWeights() [][]float64 {
+	return l.Weight
+}
+
+func (l *Linear) GetGradients() [][]float64 {
+	return l.dWeight
+}
+
+func (l *Linear) UpdateWeights(weightsUpdate [][]float64) {
+	l.Weight = weightsUpdate
+}
+
+func (l *Linear) GetBiases() [][]float64 {
+	return l.Bias
+}
+
+func (l *Linear) GetBiasGradients() [][]float64 {
+	return l.dBias
+}
+
+func (l *Linear) UpdateBiases(biasUpdate [][]float64) {
+	l.Bias = biasUpdate
 }

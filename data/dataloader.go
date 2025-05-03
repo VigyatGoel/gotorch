@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -23,19 +24,26 @@ type DataLoader struct {
 	Shuffle     bool
 	Seed        int64
 	SplitRatio  float64
+	BatchSize   int
 	Features    [][]float64
 	Targets     [][]float64
 	ClassNames  []string
 	ColumnNames []string
 }
 
-func NewDataLoader(filePath string, dataType DataType) *DataLoader {
+type Batch struct {
+	Features [][]float64
+	Targets  [][]float64
+}
+
+func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoader {
 	return &DataLoader{
 		FilePath:   filePath,
 		DataType:   dataType,
 		Shuffle:    true,
 		Seed:       42,
 		SplitRatio: 0.8,
+		BatchSize:  batchSize,
 		ClassNames: []string{},
 	}
 }
@@ -146,6 +154,58 @@ func (dl *DataLoader) GetAll() ([][]float64, [][]float64) {
 	return dl.Features, dl.Targets
 }
 
+func (dl *DataLoader) GetBatches(features [][]float64, targets [][]float64, epoch int) []Batch {
+	if dl.BatchSize <= 0 {
+		return []Batch{{Features: features, Targets: targets}}
+	}
+
+	n := len(features)
+	indices := make([]int, n)
+	for i := 0; i < n; i++ {
+		indices[i] = i
+	}
+
+	if dl.Shuffle {
+		epochSeed := dl.Seed + int64(epoch)
+		r := rand.New(rand.NewSource(epochSeed))
+		r.Shuffle(n, func(i, j int) {
+			indices[i], indices[j] = indices[j], indices[i]
+		})
+	}
+
+	numBatches := int(math.Ceil(float64(n) / float64(dl.BatchSize)))
+	batches := make([]Batch, 0, numBatches)
+
+	for i := 0; i < n; i += dl.BatchSize {
+		end := i + dl.BatchSize
+		if end > n {
+			end = n
+		}
+
+		batchIndices := indices[i:end]
+		batchFeatures := make([][]float64, len(batchIndices))
+		batchTargets := make([][]float64, len(batchIndices))
+
+		for j, idx := range batchIndices {
+			batchFeatures[j] = features[idx]
+			batchTargets[j] = targets[idx]
+		}
+		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
+	}
+
+	return batches
+}
+
+func (dl *DataLoader) NumFeatures() int {
+	if len(dl.Features) == 0 || len(dl.Features[0]) == 0 {
+		if len(dl.ColumnNames) > 1 {
+			return len(dl.ColumnNames) - 1
+		}
+		return 0
+	}
+	return len(dl.Features[0])
+}
+
 func (dl *DataLoader) Split() (trainX, trainY, testX, testY [][]float64) {
 	if len(dl.Features) == 0 {
 		return nil, nil, nil, nil
@@ -179,4 +239,41 @@ func (dl *DataLoader) Split() (trainX, trainY, testX, testY [][]float64) {
 	}
 
 	return
+}
+
+func (dl *DataLoader) NormalizeFeatures() {
+	if len(dl.Features) == 0 {
+		return
+	}
+
+	numFeatures := len(dl.Features[0])
+	means := make([]float64, numFeatures)
+	stdDevs := make([]float64, numFeatures)
+
+	for _, row := range dl.Features {
+		for j := 0; j < numFeatures; j++ {
+			means[j] += row[j]
+		}
+	}
+	for j := 0; j < numFeatures; j++ {
+		means[j] /= float64(len(dl.Features))
+	}
+
+	for _, row := range dl.Features {
+		for j := 0; j < numFeatures; j++ {
+			stdDevs[j] += math.Pow(row[j]-means[j], 2)
+		}
+	}
+	for j := 0; j < numFeatures; j++ {
+		stdDevs[j] = math.Sqrt(stdDevs[j] / float64(len(dl.Features)))
+		if stdDevs[j] == 0 {
+			stdDevs[j] = 1 
+		}
+	}
+
+	for i := range dl.Features {
+		for j := 0; j < numFeatures; j++ {
+			dl.Features[i][j] = (dl.Features[i][j] - means[j]) / stdDevs[j]
+		}
+	}
 }
