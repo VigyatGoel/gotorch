@@ -22,7 +22,10 @@ GoTorch is a deep learning framework implemented in pure Go, designed for simpli
 ## Installation
 
 ```bash
-# Clone the repository
+# Option 1: Use go get to install the package
+go get github.com/VigyatGoel/gotorch
+
+# Option 2: Clone the repository
 git clone https://github.com/VigyatGoel/gotorch.git
 
 # Navigate to project directory
