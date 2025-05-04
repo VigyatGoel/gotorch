@@ -16,7 +16,7 @@ const (
 )
 
 func main() {
-	dataLoader := data.NewDataLoader("cmd/iris.csv", data.Classification, BatchSize)
+	dataLoader := data.NewDataLoader("examples/iris.csv", data.Classification, BatchSize)
 	err := dataLoader.Load()
 	if err != nil {
 		log.Fatalf("Error loading data: %v", err)
@@ -34,7 +34,7 @@ func main() {
 
 	model := createModel(numFeatures)
 	criterion := loss.NewCrossEntropyLoss()
-	epochs := 5
+	epochs := 20
 
 	fmt.Println("\nTRAINING WITH ADAM")
 	adamOpt := optimizer.DefaultAdam(0.001)
@@ -62,7 +62,7 @@ func createModel(inputFeatures int) *network.Sequential {
 func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLoss,
 	dataLoader *data.DataLoader,
 	x_train, y_train, x_test, y_test [][]float64, epochs int, modelPath string) {
-	for epoch := 0; epoch < epochs; epoch++ {
+	for epoch := range epochs {
 		epochLoss := 0.0
 		batches := dataLoader.GetBatches(x_train, y_train, epoch)
 
