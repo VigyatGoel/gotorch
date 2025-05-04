@@ -267,7 +267,7 @@ func (dl *DataLoader) NormalizeFeatures() {
 	for j := 0; j < numFeatures; j++ {
 		stdDevs[j] = math.Sqrt(stdDevs[j] / float64(len(dl.Features)))
 		if stdDevs[j] == 0 {
-			stdDevs[j] = 1 
+			stdDevs[j] = 1
 		}
 	}
 

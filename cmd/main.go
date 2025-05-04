@@ -16,13 +16,13 @@ const (
 )
 
 func main() {
-	dataLoader := data.NewDataLoader("cmd/train.csv", data.Classification, BatchSize)
+	dataLoader := data.NewDataLoader("cmd/iris.csv", data.Classification, BatchSize)
 	err := dataLoader.Load()
 	if err != nil {
 		log.Fatalf("Error loading data: %v", err)
 	}
 
-	dataLoader.NormalizeFeatures() 
+	dataLoader.NormalizeFeatures()
 
 	numFeatures := dataLoader.NumFeatures()
 	if numFeatures == 0 {
@@ -34,12 +34,16 @@ func main() {
 
 	model := createModel(numFeatures)
 	criterion := loss.NewCrossEntropyLoss()
-	epochs := 50
+	epochs := 5
 
 	fmt.Println("\nTRAINING WITH ADAM")
 	adamOpt := optimizer.DefaultAdam(0.001)
 	model.SetOptimizer(adamOpt)
-	trainAndEvaluate(model, criterion, dataLoader, x_train, y_train, x_test, y_test, epochs)
+
+	modelPath := "iris_model.gth"
+	trainAndEvaluate(model, criterion, dataLoader, x_train, y_train, x_test, y_test, epochs, modelPath)
+
+	loadAndUseModel(modelPath, x_test, y_test)
 }
 
 func createModel(inputFeatures int) *network.Sequential {
@@ -57,7 +61,7 @@ func createModel(inputFeatures int) *network.Sequential {
 
 func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLoss,
 	dataLoader *data.DataLoader,
-	x_train, y_train, x_test, y_test [][]float64, epochs int) {
+	x_train, y_train, x_test, y_test [][]float64, epochs int, modelPath string) {
 	for epoch := 0; epoch < epochs; epoch++ {
 		epochLoss := 0.0
 		batches := dataLoader.GetBatches(x_train, y_train, epoch)
@@ -86,16 +90,51 @@ func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLos
 
 	accuracy := float64(correct) / float64(len(x_test)) * 100
 	fmt.Printf("Accuracy: %.2f%% (%d/%d)\n", accuracy, correct, len(x_test))
+
+	if modelPath != "" {
+		err := model.Save(modelPath)
+		if err != nil {
+			fmt.Printf("Error saving model: %v\n", err)
+		} else {
+			fmt.Printf("Model saved successfully to %s\n", modelPath)
+		}
+	}
+}
+
+func loadAndUseModel(modelPath string, x_test, y_test [][]float64) {
+	fmt.Printf("\nLoading model from %s\n", modelPath)
+	loadedModel, err := network.Load(modelPath)
+	if err != nil {
+		fmt.Printf("Error loading model: %v\n", err)
+		return
+	}
+
+	fmt.Println("Model loaded successfully! Evaluating...")
+
+	preds := loadedModel.Predict(x_test)
+	correct := 0
+	for i := range x_test {
+		predictedClass := getMaxIndex(preds[i])
+		actualClass := getMaxIndex(y_test[i])
+		if predictedClass == actualClass {
+			correct++
+		}
+	}
+
+	accuracy := float64(correct) / float64(len(x_test)) * 100
+	fmt.Printf("Loaded model accuracy: %.2f%% (%d/%d)\n", accuracy, correct, len(x_test))
 }
 
 func getMaxIndex(values []float64) int {
-	maxIndex := 0
+	maxIdx := 0
 	maxVal := values[0]
+
 	for i, val := range values {
 		if val > maxVal {
 			maxVal = val
-			maxIndex = i
+			maxIdx = i
 		}
 	}
-	return maxIndex
+
+	return maxIdx
 }

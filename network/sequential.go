@@ -3,11 +3,20 @@ package network
 import (
 	layer "github.com/VigyatGoel/gotorch/layers"
 	"github.com/VigyatGoel/gotorch/optimizer"
+	"github.com/VigyatGoel/gotorch/persistence"
 )
 
 type Sequential struct {
 	Layers    []layer.Layer
 	Optimizer optimizer.Optimizer
+}
+
+func (s *Sequential) GetLayers() []layer.Layer {
+	return s.Layers
+}
+
+func (s *Sequential) GetOptimizer() optimizer.Optimizer {
+	return s.Optimizer
 }
 
 func NewSequential(layers ...layer.Layer) *Sequential {
@@ -64,4 +73,22 @@ func (s *Sequential) Backward(gradOutput [][]float64) [][]float64 {
 
 func (s *Sequential) Predict(input [][]float64) [][]float64 {
 	return s.Forward(input)
+}
+
+func (s *Sequential) Save(filePath string) error {
+	return persistence.SaveModel(s, filePath)
+}
+
+func Load(filePath string) (*Sequential, error) {
+	modelData, err := persistence.LoadModelData(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	model := &Sequential{
+		Layers:    modelData.Layers,
+		Optimizer: modelData.Optimizer,
+	}
+
+	return model, nil
 }
