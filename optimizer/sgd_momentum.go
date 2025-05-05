@@ -1,20 +1,24 @@
 package optimizer
 
-import "fmt"
+import (
+	"fmt"
+
+	"gonum.org/v1/gonum/mat"
+)
 
 type SGDMomentum struct {
-	LR              float64
-	Momentum        float64
-	VelocityMap     map[string][][]float64
-	BiasVelocityMap map[string][][]float64
+	LR       float64
+	Momentum float64
+	v        map[string]*mat.Dense
+	vb       map[string]*mat.Dense
 }
 
 func NewSGDMomentum(lr float64, momentum float64) *SGDMomentum {
 	return &SGDMomentum{
-		LR:              lr,
-		Momentum:        momentum,
-		VelocityMap:     make(map[string][][]float64),
-		BiasVelocityMap: make(map[string][][]float64),
+		LR:       lr,
+		Momentum: momentum,
+		v:        make(map[string]*mat.Dense),
+		vb:       make(map[string]*mat.Dense),
 	}
 }
 
@@ -22,68 +26,70 @@ func DefaultSGDMomentum(lr float64) *SGDMomentum {
 	return NewSGDMomentum(lr, 0.9)
 }
 
-func (sgd *SGDMomentum) Step(weights [][]float64, gradients [][]float64) [][]float64 {
-	if len(weights) == 0 || len(gradients) == 0 {
+func (sgd *SGDMomentum) Step(weights *mat.Dense, gradients *mat.Dense) *mat.Dense {
+	rows, cols := weights.Dims()
+	if rows == 0 || cols == 0 {
 		fmt.Println("SGD optimizer skipping update - empty weights or gradients")
 		return weights
 	}
 
-	if len(weights) != len(gradients) {
-		fmt.Printf("SGD optimizer dimension mismatch: weights %dx%d vs gradients %dx%d\n",
-			len(weights), len(weights[0]), len(gradients), len(gradients[0]))
+	gRows, gCols := gradients.Dims()
+	if rows != gRows || cols != gCols {
+		fmt.Printf("SGD optimizer dimension mismatch: weights %dx%d vs gradients %dx%d\n", rows, cols, gRows, gCols)
 		return weights
 	}
 
-	key := fmt.Sprintf("weights_%dx%d", len(weights), len(weights[0]))
-
-	if _, ok := sgd.VelocityMap[key]; !ok {
-		sgd.VelocityMap[key] = make([][]float64, len(weights))
-
-		for i := range weights {
-			sgd.VelocityMap[key][i] = make([]float64, len(weights[i]))
-			for j := range weights[i] {
-				sgd.VelocityMap[key][i][j] = 0.0
-			}
-		}
+	key := fmt.Sprintf("weights_%dx%d", rows, cols)
+	if _, ok := sgd.v[key]; !ok {
+		sgd.v[key] = mat.NewDense(rows, cols, nil)
 	}
 
-	for i := range weights {
-		if len(weights[i]) != len(gradients[i]) {
-			fmt.Printf("SGD optimizer: Inner dimension mismatch at row %d\n", i)
-			continue
-		}
-
-		for j := range weights[i] {
-			sgd.VelocityMap[key][i][j] = sgd.Momentum*sgd.VelocityMap[key][i][j] - sgd.LR*gradients[i][j]
-			weights[i][j] += sgd.VelocityMap[key][i][j]
+	v := sgd.v[key]
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			v.Set(i, j, sgd.Momentum*v.At(i, j)-sgd.LR*gradients.At(i, j))
+			weights.Set(i, j, weights.At(i, j)+v.At(i, j))
 		}
 	}
 
 	return weights
 }
 
-func (sgd *SGDMomentum) StepBias(biases [][]float64, biasGradients [][]float64) [][]float64 {
-	if len(biases) == 0 || len(biasGradients) == 0 || len(biases[0]) == 0 || len(biasGradients[0]) == 0 {
+func (sgd *SGDMomentum) StepBias(biases *mat.Dense, biasGradients *mat.Dense) *mat.Dense {
+	if biases == nil || biasGradients == nil {
 		return biases
 	}
 
-	key := fmt.Sprintf("bias_%d", len(biases[0]))
-
-	if _, ok := sgd.BiasVelocityMap[key]; !ok {
-		sgd.BiasVelocityMap[key] = make([][]float64, 1)
-		sgd.BiasVelocityMap[key][0] = make([]float64, len(biases[0]))
+	rows, cols := biases.Dims()
+	if rows == 0 || cols == 0 {
+		return biases
 	}
 
-	for j := range biases[0] {
-		sgd.BiasVelocityMap[key][0][j] = sgd.Momentum*sgd.BiasVelocityMap[key][0][j] - sgd.LR*biasGradients[0][j]
-		biases[0][j] += sgd.BiasVelocityMap[key][0][j]
+	gRows, gCols := biasGradients.Dims()
+	if rows != gRows || cols != gCols {
+		fmt.Printf("SGD optimizer dimension mismatch: biases %dx%d vs biasGradients %dx%d\n", rows, cols, gRows, gCols)
+		return biases
 	}
+
+	key := fmt.Sprintf("bias_%dx%d", rows, cols)
+	if _, ok := sgd.vb[key]; !ok {
+		sgd.vb[key] = mat.NewDense(rows, cols, nil)
+	}
+
+	vb := sgd.vb[key]
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			vb.Set(i, j, sgd.Momentum*vb.At(i, j)-sgd.LR*biasGradients.At(i, j))
+			biases.Set(i, j, biases.At(i, j)+vb.At(i, j))
+		}
+	}
+
 	return biases
 }
 
 func (sgd *SGDMomentum) ZeroGrad() {
-	sgd.VelocityMap = make(map[string][][]float64)
-	sgd.BiasVelocityMap = make(map[string][][]float64)
+	sgd.v = make(map[string]*mat.Dense)
+	sgd.vb = make(map[string]*mat.Dense)
 }
 
 func (sgd *SGDMomentum) GetLearningRate() float64 {

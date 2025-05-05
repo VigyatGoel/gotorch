@@ -9,6 +9,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 type DataType int
@@ -25,15 +27,15 @@ type DataLoader struct {
 	Seed        int64
 	SplitRatio  float64
 	BatchSize   int
-	Features    [][]float64
-	Targets     [][]float64
+	Features    *mat.Dense
+	Targets     *mat.Dense
 	ClassNames  []string
 	ColumnNames []string
 }
 
 type Batch struct {
-	Features [][]float64
-	Targets  [][]float64
+	Features *mat.Dense
+	Targets  *mat.Dense
 }
 
 func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoader {
@@ -80,15 +82,17 @@ func (dl *DataLoader) Load() error {
 	}
 
 	cols := len(records[0])
-	dl.Features = make([][]float64, len(records))
+	rows := len(records)
+	featuresData := make([]float64, rows*(cols-1))
+	targetsData := make([]float64, rows)
+
 	for i, record := range records {
-		dl.Features[i] = make([]float64, cols-1)
 		for j := 0; j < cols-1; j++ {
 			val, err := strconv.ParseFloat(strings.TrimSpace(record[j]), 64)
 			if err != nil {
 				return fmt.Errorf("invalid float at row %d col %d value '%s': %w", i, j, record[j], err)
 			}
-			dl.Features[i][j] = val
+			featuresData[i*(cols-1)+j] = val
 		}
 	}
 
@@ -102,24 +106,25 @@ func (dl *DataLoader) Load() error {
 			}
 		}
 
-		dl.Targets = make([][]float64, len(records))
+		targetsData = make([]float64, rows*len(dl.ClassNames))
 		for i, record := range records {
 			label := strings.TrimSpace(record[cols-1])
 			classIndex := classMap[label]
-			oneHot := make([]float64, len(dl.ClassNames))
-			oneHot[classIndex] = 1.0
-			dl.Targets[i] = oneHot
+			targetsData[i*len(dl.ClassNames)+classIndex] = 1.0
 		}
+		dl.Targets = mat.NewDense(rows, len(dl.ClassNames), targetsData)
 	} else {
-		dl.Targets = make([][]float64, len(records))
 		for i, record := range records {
 			val, err := strconv.ParseFloat(strings.TrimSpace(record[cols-1]), 64)
 			if err != nil {
 				return fmt.Errorf("invalid target at row %d value '%s': %w", i, record[cols-1], err)
 			}
-			dl.Targets[i] = []float64{val}
+			targetsData[i] = val
 		}
+		dl.Targets = mat.NewDense(rows, 1, targetsData)
 	}
+
+	dl.Features = mat.NewDense(rows, cols-1, featuresData)
 
 	if dl.Shuffle {
 		dl.shuffle()
@@ -134,11 +139,19 @@ func (dl *DataLoader) Load() error {
 
 func (dl *DataLoader) shuffle() {
 	r := rand.New(rand.NewSource(dl.Seed))
-	n := len(dl.Features)
-	for i := n - 1; i > 0; i-- {
+	rows, cols := dl.Features.Dims()
+	_, targetCols := dl.Targets.Dims()
+
+	for i := rows - 1; i > 0; i-- {
 		j := r.Intn(i + 1)
-		dl.Features[i], dl.Features[j] = dl.Features[j], dl.Features[i]
-		dl.Targets[i], dl.Targets[j] = dl.Targets[j], dl.Targets[i]
+		for k := 0; k < cols; k++ {
+			dl.Features.Set(i, k, dl.Features.At(j, k))
+			dl.Features.Set(j, k, dl.Features.At(i, k))
+		}
+		for k := 0; k < targetCols; k++ {
+			dl.Targets.Set(i, k, dl.Targets.At(j, k))
+			dl.Targets.Set(j, k, dl.Targets.At(i, k))
+		}
 	}
 }
 
@@ -150,45 +163,48 @@ func (dl *DataLoader) GetColumnNames() []string {
 	return dl.ColumnNames
 }
 
-func (dl *DataLoader) GetAll() ([][]float64, [][]float64) {
+func (dl *DataLoader) GetAll() (*mat.Dense, *mat.Dense) {
 	return dl.Features, dl.Targets
 }
 
-func (dl *DataLoader) GetBatches(features [][]float64, targets [][]float64, epoch int) []Batch {
+func (dl *DataLoader) GetBatches(features *mat.Dense, targets *mat.Dense, epoch int) []Batch {
+	rows, _ := features.Dims()
 	if dl.BatchSize <= 0 {
 		return []Batch{{Features: features, Targets: targets}}
 	}
 
-	n := len(features)
-	indices := make([]int, n)
-	for i := 0; i < n; i++ {
+	indices := make([]int, rows)
+	for i := 0; i < rows; i++ {
 		indices[i] = i
 	}
 
 	if dl.Shuffle {
 		epochSeed := dl.Seed + int64(epoch)
 		r := rand.New(rand.NewSource(epochSeed))
-		r.Shuffle(n, func(i, j int) {
+		r.Shuffle(rows, func(i, j int) {
 			indices[i], indices[j] = indices[j], indices[i]
 		})
 	}
 
-	numBatches := int(math.Ceil(float64(n) / float64(dl.BatchSize)))
+	numBatches := int(math.Ceil(float64(rows) / float64(dl.BatchSize)))
 	batches := make([]Batch, 0, numBatches)
 
-	for i := 0; i < n; i += dl.BatchSize {
+	for i := 0; i < rows; i += dl.BatchSize {
 		end := i + dl.BatchSize
-		if end > n {
-			end = n
+		if end > rows {
+			end = rows
 		}
 
-		batchIndices := indices[i:end]
-		batchFeatures := make([][]float64, len(batchIndices))
-		batchTargets := make([][]float64, len(batchIndices))
+		batchFeatures := mat.NewDense(end-i, features.RawMatrix().Cols, nil)
+		batchTargets := mat.NewDense(end-i, targets.RawMatrix().Cols, nil)
 
-		for j, idx := range batchIndices {
-			batchFeatures[j] = features[idx]
-			batchTargets[j] = targets[idx]
+		for j := i; j < end; j++ {
+			for k := 0; k < features.RawMatrix().Cols; k++ {
+				batchFeatures.Set(j-i, k, features.At(indices[j], k))
+			}
+			for k := 0; k < targets.RawMatrix().Cols; k++ {
+				batchTargets.Set(j-i, k, targets.At(indices[j], k))
+			}
 		}
 		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
 	}
@@ -197,83 +213,88 @@ func (dl *DataLoader) GetBatches(features [][]float64, targets [][]float64, epoc
 }
 
 func (dl *DataLoader) NumFeatures() int {
-	if len(dl.Features) == 0 || len(dl.Features[0]) == 0 {
+	rows, cols := dl.Features.Dims()
+	if rows == 0 || cols == 0 {
 		if len(dl.ColumnNames) > 1 {
 			return len(dl.ColumnNames) - 1
 		}
 		return 0
 	}
-	return len(dl.Features[0])
+	return cols
 }
 
-func (dl *DataLoader) Split() (trainX, trainY, testX, testY [][]float64) {
-	if len(dl.Features) == 0 {
+func (dl *DataLoader) Split() (trainX, trainY, testX, testY *mat.Dense) {
+	rows, cols := dl.Features.Dims()
+	if rows == 0 {
 		return nil, nil, nil, nil
 	}
 
-	split := int(float64(len(dl.Features)) * dl.SplitRatio)
+	split := int(float64(rows) * dl.SplitRatio)
 	if split <= 0 {
 		split = 1
-	} else if split >= len(dl.Features) {
-		split = len(dl.Features) - 1
+	} else if split >= rows {
+		split = rows - 1
 	}
 
-	trainX = make([][]float64, split)
-	trainY = make([][]float64, split)
+	trainX = mat.NewDense(split, cols, nil)
+	trainY = mat.NewDense(split, dl.Targets.RawMatrix().Cols, nil)
+	testX = mat.NewDense(rows-split, cols, nil)
+	testY = mat.NewDense(rows-split, dl.Targets.RawMatrix().Cols, nil)
+
 	for i := 0; i < split; i++ {
-		trainX[i] = make([]float64, len(dl.Features[i]))
-		copy(trainX[i], dl.Features[i])
-
-		trainY[i] = make([]float64, len(dl.Targets[i]))
-		copy(trainY[i], dl.Targets[i])
+		for j := 0; j < cols; j++ {
+			trainX.Set(i, j, dl.Features.At(i, j))
+		}
+		for j := 0; j < dl.Targets.RawMatrix().Cols; j++ {
+			trainY.Set(i, j, dl.Targets.At(i, j))
+		}
 	}
 
-	testX = make([][]float64, len(dl.Features)-split)
-	testY = make([][]float64, len(dl.Features)-split)
-	for i := 0; i < len(dl.Features)-split; i++ {
-		testX[i] = make([]float64, len(dl.Features[i+split]))
-		copy(testX[i], dl.Features[i+split])
-
-		testY[i] = make([]float64, len(dl.Targets[i+split]))
-		copy(testY[i], dl.Targets[i+split])
+	for i := split; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			testX.Set(i-split, j, dl.Features.At(i, j))
+		}
+		for j := 0; j < dl.Targets.RawMatrix().Cols; j++ {
+			testY.Set(i-split, j, dl.Targets.At(i, j))
+		}
 	}
 
 	return
 }
 
 func (dl *DataLoader) NormalizeFeatures() {
-	if len(dl.Features) == 0 {
+	rows, cols := dl.Features.Dims()
+	if rows == 0 {
 		return
 	}
 
-	numFeatures := len(dl.Features[0])
-	means := make([]float64, numFeatures)
-	stdDevs := make([]float64, numFeatures)
+	means := make([]float64, cols)
+	stdDevs := make([]float64, cols)
 
-	for _, row := range dl.Features {
-		for j := 0; j < numFeatures; j++ {
-			means[j] += row[j]
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			means[j] += dl.Features.At(i, j)
 		}
 	}
-	for j := 0; j < numFeatures; j++ {
-		means[j] /= float64(len(dl.Features))
+	for j := 0; j < cols; j++ {
+		means[j] /= float64(rows)
 	}
 
-	for _, row := range dl.Features {
-		for j := 0; j < numFeatures; j++ {
-			stdDevs[j] += math.Pow(row[j]-means[j], 2)
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			stdDevs[j] += math.Pow(dl.Features.At(i, j)-means[j], 2)
 		}
 	}
-	for j := 0; j < numFeatures; j++ {
-		stdDevs[j] = math.Sqrt(stdDevs[j] / float64(len(dl.Features)))
+	for j := 0; j < cols; j++ {
+		stdDevs[j] = math.Sqrt(stdDevs[j] / float64(rows))
 		if stdDevs[j] == 0 {
 			stdDevs[j] = 1
 		}
 	}
 
-	for i := range dl.Features {
-		for j := 0; j < numFeatures; j++ {
-			dl.Features[i][j] = (dl.Features[i][j] - means[j]) / stdDevs[j]
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			dl.Features.Set(i, j, (dl.Features.At(i, j)-means[j])/stdDevs[j])
 		}
 	}
 }

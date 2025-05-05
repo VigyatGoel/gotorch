@@ -1,79 +1,88 @@
 package utils
 
-import "math"
+import (
+	"math"
 
-func Dot(a, b [][]float64) [][]float64 {
-	m, n, p := len(a), len(b), len(b[0])
-	res := make([][]float64, m)
-	for i := 0; i < m; i++ {
-		res[i] = make([]float64, p)
-		for j := 0; j < p; j++ {
-			for k := 0; k < n; k++ {
-				res[i][j] += a[i][k] * b[k][j]
+	"gonum.org/v1/gonum/mat"
+)
+
+var matrixCache = make(map[string]*mat.Dense)
+
+func Zeros(rows, cols int) *mat.Dense {
+	return mat.NewDense(rows, cols, nil)
+}
+
+func Ones(rows, cols int) *mat.Dense {
+	data := make([]float64, rows*cols)
+	for i := range data {
+		data[i] = 1.0
+	}
+	return mat.NewDense(rows, cols, data)
+}
+
+func Dot(a, b *mat.Dense) *mat.Dense {
+	aRows, aCols := a.Dims()
+	bRows, bCols := b.Dims()
+
+	if aCols != bRows {
+		panic("Dimension mismatch for matrix multiplication")
+	}
+
+	result := mat.NewDense(aRows, bCols, nil)
+	result.Mul(a, b)
+	return result
+}
+
+func Add(a, b *mat.Dense) *mat.Dense {
+	aRows, aCols := a.Dims()
+	bRows, bCols := b.Dims()
+
+	if bRows == 1 && aRows > 1 {
+		result := mat.NewDense(aRows, aCols, nil)
+		aRaw := a.RawMatrix()
+		bRaw := b.RawMatrix()
+		resultRaw := result.RawMatrix()
+		for i := 0; i < aRows; i++ {
+			for j := 0; j < aCols; j++ {
+				resultRaw.Data[i*resultRaw.Stride+j] = aRaw.Data[i*aRaw.Stride+j] + bRaw.Data[j]
 			}
 		}
+		return result
 	}
-	return res
+
+	if aRows != bRows || aCols != bCols {
+		panic("Dimension mismatch for matrix addition")
+	}
+
+	result := mat.NewDense(aRows, aCols, nil)
+	result.Add(a, b)
+	return result
 }
 
-func Add(a, b [][]float64) [][]float64 {
-	out := make([][]float64, len(a))
-	for i := range a {
-		out[i] = make([]float64, len(a[0]))
-		for j := range a[0] {
-			if len(b) == 1 {
-				out[i][j] = a[i][j] + b[0][j]
-			} else {
-				out[i][j] = a[i][j] + b[i][j]
-			}
+func Transpose(a *mat.Dense) *mat.Dense {
+	rows, cols := a.Dims()
+	result := mat.NewDense(cols, rows, nil)
+	aRaw := a.RawMatrix()
+	resultRaw := result.RawMatrix()
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			resultRaw.Data[j*resultRaw.Stride+i] = aRaw.Data[i*aRaw.Stride+j]
 		}
 	}
-	return out
+	return result
 }
 
-func Transpose(a [][]float64) [][]float64 {
-	m, n := len(a), len(a[0])
-	res := make([][]float64, n)
-	for i := range res {
-		res[i] = make([]float64, m)
-		for j := range res[0] {
-			res[i][j] = a[j][i]
-		}
-	}
-	return res
+func ApplyFunc(a *mat.Dense, f func(float64) float64) *mat.Dense {
+	rows, cols := a.Dims()
+	result := mat.NewDense(rows, cols, nil)
+	result.Apply(func(_, _ int, v float64) float64 {
+		return f(v)
+	}, a)
+	return result
 }
 
-func ApplyFunc(a [][]float64, f func(float64) float64) [][]float64 {
-	out := make([][]float64, len(a))
-	for i := range a {
-		out[i] = make([]float64, len(a[0]))
-		for j := range a[0] {
-			out[i][j] = f(a[i][j])
-		}
-	}
-	return out
-}
-
-func Zeros(rows, cols int) [][]float64 {
-	out := make([][]float64, rows)
-	for i := range out {
-		out[i] = make([]float64, cols)
-		for j := range out[i] {
-			out[i][j] = 0.0
-		}
-	}
-	return out
-}
-
-func Ones(rows, cols int) [][]float64 {
-	out := make([][]float64, rows)
-	for i := range out {
-		out[i] = make([]float64, cols)
-		for j := range out[i] {
-			out[i][j] = 1.0
-		}
-	}
-	return out
+func ApplyFuncDense(a *mat.Dense, f func(float64) float64) *mat.Dense {
+	return ApplyFunc(a, f)
 }
 
 func Sigmoid(x float64) float64 {
@@ -99,25 +108,32 @@ func ReLUDerivative(x float64) float64 {
 	return 0
 }
 
-func Softmax(logits [][]float64) [][]float64 {
-	out := make([][]float64, len(logits))
-	for i := range logits {
-		maxLogit := logits[i][0]
-		for _, val := range logits[i] {
-			if val > maxLogit {
-				maxLogit = val
+func Softmax(logits *mat.Dense) *mat.Dense {
+	rows, cols := logits.Dims()
+	result := mat.NewDense(rows, cols, nil)
+	logitsRaw := logits.RawMatrix()
+	resultRaw := result.RawMatrix()
+	for i := 0; i < rows; i++ {
+		maxVal := logitsRaw.Data[i*logitsRaw.Stride]
+		for j := 1; j < cols; j++ {
+			val := logitsRaw.Data[i*logitsRaw.Stride+j]
+			if val > maxVal {
+				maxVal = val
 			}
 		}
-
 		sum := 0.0
-		out[i] = make([]float64, len(logits[0]))
-		for j := range logits[0] {
-			out[i][j] = math.Exp(logits[i][j] - maxLogit)
-			sum += out[i][j]
+		expValues := make([]float64, cols)
+		for j := 0; j < cols; j++ {
+			expValues[j] = math.Exp(logitsRaw.Data[i*logitsRaw.Stride+j] - maxVal)
+			sum += expValues[j]
 		}
-		for j := range logits[0] {
-			out[i][j] /= sum
+		for j := 0; j < cols; j++ {
+			resultRaw.Data[i*resultRaw.Stride+j] = expValues[j] / sum
 		}
 	}
-	return out
+	return result
+}
+
+func SoftmaxDense(logits *mat.Dense) *mat.Dense {
+	return Softmax(logits)
 }

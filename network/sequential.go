@@ -4,6 +4,7 @@ import (
 	layer "github.com/VigyatGoel/gotorch/layers"
 	"github.com/VigyatGoel/gotorch/optimizer"
 	"github.com/VigyatGoel/gotorch/persistence"
+	"gonum.org/v1/gonum/mat"
 )
 
 type Sequential struct {
@@ -33,7 +34,7 @@ func (s *Sequential) Add(layer layer.Layer) {
 	s.Layers = append(s.Layers, layer)
 }
 
-func (s *Sequential) Forward(input [][]float64) [][]float64 {
+func (s *Sequential) Forward(input *mat.Dense) *mat.Dense {
 	output := input
 	for _, layer := range s.Layers {
 		output = layer.Forward(output)
@@ -41,7 +42,7 @@ func (s *Sequential) Forward(input [][]float64) [][]float64 {
 	return output
 }
 
-func (s *Sequential) Backward(gradOutput [][]float64) [][]float64 {
+func (s *Sequential) Backward(gradOutput *mat.Dense) *mat.Dense {
 	for i := len(s.Layers) - 1; i >= 0; i-- {
 		gradOutput = s.Layers[i].Backward(gradOutput)
 	}
@@ -50,20 +51,16 @@ func (s *Sequential) Backward(gradOutput [][]float64) [][]float64 {
 		for _, l := range s.Layers {
 			weights := l.GetWeights()
 			gradients := l.GetGradients()
-			if weights != nil && gradients != nil && len(weights) > 0 && len(gradients) > 0 {
-				if len(weights) == len(gradients) && (len(weights) == 0 || len(weights[0]) == len(gradients[0])) {
-					updatedWeights := s.Optimizer.Step(weights, gradients)
-					l.UpdateWeights(updatedWeights)
-				}
+			if weights != nil && gradients != nil {
+				updatedWeights := s.Optimizer.Step(weights, gradients)
+				l.UpdateWeights(updatedWeights)
 			}
 
 			biases := l.GetBiases()
 			biasGradients := l.GetBiasGradients()
-			if biases != nil && biasGradients != nil && len(biases) > 0 && len(biasGradients) > 0 {
-				if len(biases) == len(biasGradients) && len(biases[0]) == len(biasGradients[0]) {
-					updatedBiases := s.Optimizer.StepBias(biases, biasGradients)
-					l.UpdateBiases(updatedBiases)
-				}
+			if biases != nil && biasGradients != nil {
+				updatedBiases := s.Optimizer.StepBias(biases, biasGradients)
+				l.UpdateBiases(updatedBiases)
 			}
 		}
 	}
@@ -71,7 +68,7 @@ func (s *Sequential) Backward(gradOutput [][]float64) [][]float64 {
 	return gradOutput
 }
 
-func (s *Sequential) Predict(input [][]float64) [][]float64 {
+func (s *Sequential) Predict(input *mat.Dense) *mat.Dense {
 	return s.Forward(input)
 }
 

@@ -3,92 +3,101 @@ package layer
 import (
 	"math/rand"
 
-	"github.com/VigyatGoel/gotorch/utils"
+	"gonum.org/v1/gonum/mat"
 )
 
 var rng = rand.New(rand.NewSource(42))
 
 type Linear struct {
-	Input   [][]float64
-	Weight  [][]float64
-	Bias    [][]float64
-	dWeight [][]float64
-	dBias   [][]float64
+	inputMat   *mat.Dense
+	weightMat  *mat.Dense
+	biasMat    *mat.Dense
+	dWeightMat *mat.Dense
+	dBiasMat   *mat.Dense
 }
 
-func NewLinear(inFeautes, outFeatures int) *Linear {
-	weights := make([][]float64, inFeautes)
-	bias := make([][]float64, 1)
-	bias[0] = make([]float64, outFeatures)
-
-	for i := range weights {
-		weights[i] = make([]float64, outFeatures)
-		for j := range weights[i] {
-			weights[i][j] = rng.Float64()*2 - 1
+func NewLinear(inFeatures, outFeatures int) *Linear {
+	weightMat := mat.NewDense(inFeatures, outFeatures, nil)
+	biasMat := mat.NewDense(1, outFeatures, nil)
+	for i := 0; i < inFeatures; i++ {
+		for j := 0; j < outFeatures; j++ {
+			weightMat.Set(i, j, rng.Float64()*2-1)
 		}
 	}
-
-	dWeights := make([][]float64, inFeautes)
-	dBias := make([][]float64, 1)
-	dBias[0] = make([]float64, outFeatures)
-
-	for i := range dWeights {
-		dWeights[i] = make([]float64, outFeatures)
-	}
-
+	dWeightMat := mat.NewDense(inFeatures, outFeatures, nil)
+	dBiasMat := mat.NewDense(1, outFeatures, nil)
 	return &Linear{
-		Weight:  weights,
-		Bias:    bias,
-		dWeight: dWeights,
-		dBias:   dBias,
+		weightMat:  weightMat,
+		biasMat:    biasMat,
+		dWeightMat: dWeightMat,
+		dBiasMat:   dBiasMat,
 	}
 }
 
-func (l *Linear) Forward(x [][]float64) [][]float64 {
-	l.Input = x
-	out := utils.Dot(x, l.Weight)
-	out = utils.Add(out, l.Bias)
-	return out
-}
-
-func (l *Linear) Backward(gradOutput [][]float64) [][]float64 { // Removed lr
-	inputT := utils.Transpose(l.Input)
-	l.dWeight = utils.Dot(inputT, gradOutput)
-
-	l.dBias = make([][]float64, 1)
-	l.dBias[0] = make([]float64, len(gradOutput[0]))
-	for i := range gradOutput {
-		for j := range gradOutput[0] {
-			l.dBias[0][j] += gradOutput[i][j]
+func (l *Linear) Forward(x *mat.Dense) *mat.Dense {
+	l.inputMat = x
+	rows, _ := x.Dims()
+	_, cols := l.weightMat.Dims()
+	result := mat.NewDense(rows, cols, nil)
+	result.Mul(x, l.weightMat)
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			result.Set(i, j, result.At(i, j)+l.biasMat.At(0, j))
 		}
 	}
-
-	weightT := utils.Transpose(l.Weight)
-	gradInput := utils.Dot(gradOutput, weightT)
-
-	return gradInput
+	return result
 }
 
-func (l *Linear) GetWeights() [][]float64 {
-	return l.Weight
+func (l *Linear) Backward(gradOutput *mat.Dense) *mat.Dense {
+	inputRows, inputCols := l.inputMat.Dims()
+	inputT := mat.NewDense(inputCols, inputRows, nil)
+	for i := 0; i < inputRows; i++ {
+		for j := 0; j < inputCols; j++ {
+			inputT.Set(j, i, l.inputMat.At(i, j))
+		}
+	}
+	l.dWeightMat.Mul(inputT, gradOutput)
+	rows, cols := gradOutput.Dims()
+	l.dBiasMat.Zero()
+	for j := 0; j < cols; j++ {
+		var sum float64
+		for i := 0; i < rows; i++ {
+			sum += gradOutput.At(i, j)
+		}
+		l.dBiasMat.Set(0, j, sum)
+	}
+	weightRows, weightCols := l.weightMat.Dims()
+	weightT := mat.NewDense(weightCols, weightRows, nil)
+	for i := 0; i < weightRows; i++ {
+		for j := 0; j < weightCols; j++ {
+			weightT.Set(j, i, l.weightMat.At(i, j))
+		}
+	}
+	gradInputMat := mat.NewDense(rows, weightT.RawMatrix().Cols, nil)
+	gradInputMat.Mul(gradOutput, weightT)
+	return gradInputMat
 }
 
-func (l *Linear) GetGradients() [][]float64 {
-	return l.dWeight
+func (l *Linear) GetWeights() *mat.Dense {
+	return l.weightMat
 }
 
-func (l *Linear) UpdateWeights(weightsUpdate [][]float64) {
-	l.Weight = weightsUpdate
+func (l *Linear) GetGradients() *mat.Dense {
+	return l.dWeightMat
 }
 
-func (l *Linear) GetBiases() [][]float64 {
-	return l.Bias
+func (l *Linear) UpdateWeights(weightsUpdate *mat.Dense) {
+	l.weightMat.CloneFrom(weightsUpdate)
 }
 
-func (l *Linear) GetBiasGradients() [][]float64 {
-	return l.dBias
+func (l *Linear) GetBiases() *mat.Dense {
+	return l.biasMat
 }
 
-func (l *Linear) UpdateBiases(biasUpdate [][]float64) {
-	l.Bias = biasUpdate
+func (l *Linear) GetBiasGradients() *mat.Dense {
+	return l.dBiasMat
+}
+
+func (l *Linear) UpdateBiases(biasUpdate *mat.Dense) {
+	l.biasMat.CloneFrom(biasUpdate)
 }

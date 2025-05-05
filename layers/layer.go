@@ -1,14 +1,16 @@
 package layer
 
+import "gonum.org/v1/gonum/mat"
+
 type Layer interface {
-	Forward(input [][]float64) [][]float64
-	Backward(dout [][]float64) [][]float64
+	Forward(input *mat.Dense) *mat.Dense
+	Backward(dout *mat.Dense) *mat.Dense
 
-	GetWeights() [][]float64
-	GetGradients() [][]float64
-	UpdateWeights(weightsUpdate [][]float64)
+	GetWeights() *mat.Dense
+	GetGradients() *mat.Dense
+	UpdateWeights(weightsUpdate *mat.Dense)
 
-	GetBiases() [][]float64
-	GetBiasGradients() [][]float64
-	UpdateBiases(biasUpdate [][]float64)
+	GetBiases() *mat.Dense
+	GetBiasGradients() *mat.Dense
+	UpdateBiases(biasUpdate *mat.Dense)
 }

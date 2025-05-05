@@ -1,8 +1,10 @@
 package optimizer
 
+import "gonum.org/v1/gonum/mat"
+
 type Optimizer interface {
-	Step(weights [][]float64, gradients [][]float64) [][]float64
-	StepBias(biases [][]float64, biasGradients [][]float64) [][]float64
+	Step(weights *mat.Dense, gradients *mat.Dense) *mat.Dense
+	StepBias(biases *mat.Dense, biasGradients *mat.Dense) *mat.Dense
 	ZeroGrad()
 	GetLearningRate() float64
 }

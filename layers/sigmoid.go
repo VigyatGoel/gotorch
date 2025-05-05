@@ -1,48 +1,38 @@
 package layer
 
-import "github.com/VigyatGoel/gotorch/utils"
+import (
+	"github.com/VigyatGoel/gotorch/utils"
+	"gonum.org/v1/gonum/mat"
+)
 
 type Sigmoid struct {
-	Output [][]float64
+	output *mat.Dense
 }
 
 func NewSigmoid() *Sigmoid {
 	return &Sigmoid{}
 }
 
-func (s *Sigmoid) Forward(x [][]float64) [][]float64 {
-	s.Output = utils.ApplyFunc(x, utils.Sigmoid)
-	return s.Output
+func (s *Sigmoid) Forward(x *mat.Dense) *mat.Dense {
+	s.output = utils.ApplyFuncDense(x, utils.Sigmoid)
+	return s.output
 }
 
-func (s *Sigmoid) Backward(gradOutput [][]float64) [][]float64 {
-	grad := utils.Zeros(len(s.Output), len(s.Output[0]))
-	for i := range s.Output {
-		for j := range s.Output[0] {
-			grad[i][j] = gradOutput[i][j] * s.Output[i][j] * (1 - s.Output[i][j])
+func (s *Sigmoid) Backward(gradOutput *mat.Dense) *mat.Dense {
+	rows, cols := s.output.Dims()
+	grad := mat.NewDense(rows, cols, nil)
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			val := s.output.At(i, j)
+			grad.Set(i, j, gradOutput.At(i, j)*val*(1-val))
 		}
 	}
 	return grad
 }
 
-func (s *Sigmoid) GetWeights() [][]float64 {
-	return nil
-}
-
-func (s *Sigmoid) GetGradients() [][]float64 {
-	return nil
-}
-
-func (s *Sigmoid) UpdateWeights(weightsUpdate [][]float64) {
-}
-
-func (s *Sigmoid) GetBiases() [][]float64 {
-	return nil
-}
-
-func (s *Sigmoid) GetBiasGradients() [][]float64 {
-	return nil
-}
-
-func (s *Sigmoid) UpdateBiases(biasUpdate [][]float64) {
-}
+func (s *Sigmoid) GetWeights() *mat.Dense                 { return nil }
+func (s *Sigmoid) GetGradients() *mat.Dense               { return nil }
+func (s *Sigmoid) UpdateWeights(weightsUpdate *mat.Dense) {}
+func (s *Sigmoid) GetBiases() *mat.Dense                  { return nil }
+func (s *Sigmoid) GetBiasGradients() *mat.Dense           { return nil }
+func (s *Sigmoid) UpdateBiases(biasUpdate *mat.Dense)     {}

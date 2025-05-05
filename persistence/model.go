@@ -7,10 +7,27 @@ import (
 	"path/filepath"
 	"reflect"
 
+	"strings"
+
 	layer "github.com/VigyatGoel/gotorch/layers"
 	"github.com/VigyatGoel/gotorch/optimizer"
-	"strings"
+	"gonum.org/v1/gonum/mat"
 )
+
+func matDenseToSerializable(m *mat.Dense) (data []float64, rows, cols int) {
+	if m == nil {
+		return nil, 0, 0
+	}
+	rows, cols = m.Dims()
+	return m.RawMatrix().Data, rows, cols
+}
+
+func serializableToMatDense(data []float64, rows, cols int) *mat.Dense {
+	if data == nil || rows == 0 || cols == 0 {
+		return nil
+	}
+	return mat.NewDense(rows, cols, data)
+}
 
 type ModelInterface interface {
 	GetLayers() []layer.Layer
@@ -18,11 +35,15 @@ type ModelInterface interface {
 }
 
 type LayerConfig struct {
-	Type        string        `json:"type"`
-	InFeatures  int           `json:"in_features,omitempty"`
-	OutFeatures int           `json:"out_features,omitempty"`
-	Weights     [][][]float64 `json:"weights,omitempty"`
-	Biases      [][][]float64 `json:"biases,omitempty"`
+	Type        string    `json:"type"`
+	InFeatures  int       `json:"in_features,omitempty"`
+	OutFeatures int       `json:"out_features,omitempty"`
+	Weights     []float64 `json:"weights,omitempty"`
+	WeightRows  int       `json:"weight_rows,omitempty"`
+	WeightCols  int       `json:"weight_cols,omitempty"`
+	Biases      []float64 `json:"biases,omitempty"`
+	BiasRows    int       `json:"bias_rows,omitempty"`
+	BiasCols    int       `json:"bias_cols,omitempty"`
 }
 
 type OptimizerConfig struct {
@@ -67,17 +88,16 @@ func SaveModel(model ModelInterface, filePath string) error {
 		switch layerType {
 		case "Linear":
 			linear, _ := l.(*layer.Linear)
-			inFeatures := len(linear.GetWeights())
-			outFeatures := 0
-			if inFeatures > 0 {
-				outFeatures = len(linear.GetWeights()[0])
-			}
-
-			layerConfig.InFeatures = inFeatures
-			layerConfig.OutFeatures = outFeatures
-
-			layerConfig.Weights = [][][]float64{linear.GetWeights()}
-			layerConfig.Biases = [][][]float64{linear.GetBiases()}
+			wData, wRows, wCols := matDenseToSerializable(linear.GetWeights())
+			bData, bRows, bCols := matDenseToSerializable(linear.GetBiases())
+			layerConfig.InFeatures = wRows
+			layerConfig.OutFeatures = wCols
+			layerConfig.Weights = wData
+			layerConfig.WeightRows = wRows
+			layerConfig.WeightCols = wCols
+			layerConfig.Biases = bData
+			layerConfig.BiasRows = bRows
+			layerConfig.BiasCols = bCols
 
 		case "ReLU", "Sigmoid", "Softmax":
 		}
@@ -132,15 +152,12 @@ func LoadModelData(filePath string) (*ModelData, error) {
 		switch layerConfig.Type {
 		case "Linear":
 			linear := layer.NewLinear(layerConfig.InFeatures, layerConfig.OutFeatures)
-
-			if layerConfig.Weights != nil && len(layerConfig.Weights) > 0 {
-				linear.UpdateWeights(layerConfig.Weights[0])
+			if layerConfig.Weights != nil && layerConfig.WeightRows > 0 && layerConfig.WeightCols > 0 {
+				linear.UpdateWeights(serializableToMatDense(layerConfig.Weights, layerConfig.WeightRows, layerConfig.WeightCols))
 			}
-
-			if layerConfig.Biases != nil && len(layerConfig.Biases) > 0 {
-				linear.UpdateBiases(layerConfig.Biases[0])
+			if layerConfig.Biases != nil && layerConfig.BiasRows > 0 && layerConfig.BiasCols > 0 {
+				linear.UpdateBiases(serializableToMatDense(layerConfig.Biases, layerConfig.BiasRows, layerConfig.BiasCols))
 			}
-
 			newLayer = linear
 
 		case "ReLU":
