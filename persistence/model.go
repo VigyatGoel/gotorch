@@ -1,7 +1,7 @@
 package persistence
 
 import (
-	"encoding/json"
+	"encoding/gob"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,13 +110,15 @@ func SaveModel(model ModelInterface, filePath string) error {
 		return fmt.Errorf("failed to create directory: %v", err)
 	}
 
-	jsonData, err := json.MarshalIndent(modelConfig, "", "  ")
+	f, err := os.Create(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to marshal model configuration: %v", err)
+		return fmt.Errorf("failed to create model file: %v", err)
 	}
+	defer f.Close()
 
-	if err := os.WriteFile(filePath, jsonData, 0644); err != nil {
-		return fmt.Errorf("failed to write model to file: %v", err)
+	encoder := gob.NewEncoder(f)
+	if err := encoder.Encode(modelConfig); err != nil {
+		return fmt.Errorf("failed to encode model configuration: %v", err)
 	}
 
 	return nil
@@ -132,14 +134,16 @@ func LoadModelData(filePath string) (*ModelData, error) {
 		return nil, fmt.Errorf("expected .gth file extension, got %s", ext)
 	}
 
-	jsonData, err := os.ReadFile(filePath)
+	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read model file: %v", err)
+		return nil, fmt.Errorf("failed to open model file: %v", err)
 	}
+	defer f.Close()
 
 	var modelConfig ModelConfig
-	if err := json.Unmarshal(jsonData, &modelConfig); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal model configuration: %v", err)
+	decoder := gob.NewDecoder(f)
+	if err := decoder.Decode(&modelConfig); err != nil {
+		return nil, fmt.Errorf("failed to decode model configuration: %v", err)
 	}
 
 	modelData := &ModelData{

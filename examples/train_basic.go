@@ -36,13 +36,13 @@ func main() {
 
 	model := createModel(numFeatures)
 	criterion := loss.NewCrossEntropyLoss()
-	epochs := 100
+	epochs := 50
 
 	fmt.Println("\nTRAINING WITH ADAM")
-	adamOpt := optimizer.NewSGD(0.0001)
+	adamOpt := optimizer.DefaultAdam(0.0001)
 	model.SetOptimizer(adamOpt)
 
-	modelPath := "iris_model.gth"
+	modelPath := "saved_model.gth"
 	trainAndEvaluate(model, criterion, dataLoader, x_train, y_train, x_test, y_test, epochs, modelPath)
 
 	loadAndUseModel(modelPath, x_test, y_test)
@@ -50,8 +50,7 @@ func main() {
 
 func createModel(inputFeatures int) *network.Sequential {
 	return network.NewSequential(
-		layer.NewLinear(inputFeatures, 512),
-		layer.NewLinear(512, 256),
+		layer.NewLinear(inputFeatures, 256),
 		layer.NewLinear(256, 128),
 		layer.NewReLU(),
 		layer.NewLinear(128, 64),
@@ -75,6 +74,8 @@ func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLos
 		batches := dataLoader.GetBatches(x_train, y_train, epoch)
 
 		for _, batch := range batches {
+			model.GetOptimizer().ZeroGrad()
+			
 			preds := model.Forward(batch.Features)
 			lossVal := criterion.Forward(preds, batch.Targets)
 			grad := criterion.Backward()

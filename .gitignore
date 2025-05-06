@@ -43,3 +43,6 @@ debug
 # Build output directories
 build/
 dist/
+
+# Saved model file
+*.gth
