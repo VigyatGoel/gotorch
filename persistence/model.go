@@ -44,6 +44,7 @@ type LayerConfig struct {
 	Biases      []float64 `json:"biases,omitempty"`
 	BiasRows    int       `json:"bias_rows,omitempty"`
 	BiasCols    int       `json:"bias_cols,omitempty"`
+	Alpha       float64   `json:"alpha,omitempty"`
 }
 
 type OptimizerConfig struct {
@@ -86,20 +87,24 @@ func SaveModel(model ModelInterface, filePath string) error {
 		}
 
 		switch layerType {
-		case "Linear":
-			linear, _ := l.(*layer.Linear)
-			wData, wRows, wCols := matDenseToSerializable(linear.GetWeights())
-			bData, bRows, bCols := matDenseToSerializable(linear.GetBiases())
-			layerConfig.InFeatures = wRows
-			layerConfig.OutFeatures = wCols
-			layerConfig.Weights = wData
-			layerConfig.WeightRows = wRows
-			layerConfig.WeightCols = wCols
-			layerConfig.Biases = bData
-			layerConfig.BiasRows = bRows
-			layerConfig.BiasCols = bCols
+			case "Linear":
+				linear, _ := l.(*layer.Linear)
+				wData, wRows, wCols := matDenseToSerializable(linear.GetWeights())
+				bData, bRows, bCols := matDenseToSerializable(linear.GetBiases())
+				layerConfig.InFeatures = wRows
+				layerConfig.OutFeatures = wCols
+				layerConfig.Weights = wData
+				layerConfig.WeightRows = wRows
+				layerConfig.WeightCols = wCols
+				layerConfig.Biases = bData
+				layerConfig.BiasRows = bRows
+				layerConfig.BiasCols = bCols
 
-		case "ReLU", "Sigmoid", "Softmax":
+			case "LeakyReLU":
+				leaky, _ := l.(*layer.LeakyReLU)
+				layerConfig.Alpha = leaky.Alpha
+
+			case "ReLU", "Sigmoid", "Softmax", "SiLU":
 		}
 
 		modelConfig.Layers[i] = layerConfig
@@ -164,6 +169,10 @@ func LoadModelData(filePath string) (*ModelData, error) {
 			}
 			newLayer = linear
 
+		case "LeakyReLU":
+			leaky := layer.NewLeakyReLU(layerConfig.Alpha)
+			newLayer = leaky
+
 		case "ReLU":
 			newLayer = layer.NewReLU()
 
@@ -172,6 +181,9 @@ func LoadModelData(filePath string) (*ModelData, error) {
 
 		case "Softmax":
 			newLayer = layer.NewSoftmax()
+
+		case "SiLU":
+			newLayer = layer.NewSiLU()
 
 		default:
 			return nil, fmt.Errorf("unsupported layer type: %s", layerConfig.Type)

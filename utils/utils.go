@@ -6,7 +6,6 @@ import (
 	"gonum.org/v1/gonum/mat"
 )
 
-var matrixCache = make(map[string]*mat.Dense)
 
 func Zeros(rows, cols int) *mat.Dense {
 	return mat.NewDense(rows, cols, nil)
@@ -108,6 +107,29 @@ func ReLUDerivative(x float64) float64 {
 	return 0
 }
 
+func LeakyReLU(x float64, alpha float64) float64 {
+	if x > 0 {
+		return x
+	}
+	return alpha * x
+}
+
+func LeakyReLUDerivative(x float64, alpha float64) float64 {
+	if x > 0 {
+		return 1
+	}
+	return alpha
+}
+
+func SiLU(x float64) float64 {
+	return x * Sigmoid(x)
+}
+
+func SiLUDerivative(x float64) float64 {
+	s := Sigmoid(x)
+	return s + (x * s * (1 - s))
+}
+
 func Softmax(logits *mat.Dense) *mat.Dense {
 	rows, cols := logits.Dims()
 	result := mat.NewDense(rows, cols, nil)
@@ -136,4 +158,18 @@ func Softmax(logits *mat.Dense) *mat.Dense {
 
 func SoftmaxDense(logits *mat.Dense) *mat.Dense {
 	return Softmax(logits)
+}
+
+func GetMaxIndexRow(m *mat.Dense, row int) int {
+	_, cols := m.Dims()
+	maxIdx := 0
+	maxVal := m.At(row, 0)
+	for j := 1; j < cols; j++ {
+		val := m.At(row, j)
+		if val > maxVal {
+			maxVal = val
+			maxIdx = j
+		}
+	}
+	return maxIdx
 }

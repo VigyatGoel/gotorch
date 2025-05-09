@@ -10,11 +10,12 @@ import (
 	"github.com/VigyatGoel/gotorch/loss"
 	"github.com/VigyatGoel/gotorch/network"
 	"github.com/VigyatGoel/gotorch/optimizer"
+	"github.com/VigyatGoel/gotorch/utils"
 	"gonum.org/v1/gonum/mat"
 )
 
 const (
-	BatchSize = 128
+	BatchSize = 512
 )
 
 func main() {
@@ -39,7 +40,7 @@ func main() {
 	epochs := 50
 
 	fmt.Println("\nTRAINING WITH ADAM")
-	adamOpt := optimizer.DefaultAdam(0.0001)
+	adamOpt := optimizer.DefaultAdam(0.001)
 	model.SetOptimizer(adamOpt)
 
 	modelPath := "saved_model.gth"
@@ -50,13 +51,17 @@ func main() {
 
 func createModel(inputFeatures int) *network.Sequential {
 	return network.NewSequential(
-		layer.NewLinear(inputFeatures, 256),
+		layer.NewLinear(inputFeatures, 1024),
+		layer.NewLinear(1024, 512),
+		layer.NewSiLU(),
+		layer.NewLinear(512, 256),
+		layer.NewSiLU(),
 		layer.NewLinear(256, 128),
-		layer.NewReLU(),
+		layer.NewSiLU(),
 		layer.NewLinear(128, 64),
-		layer.NewReLU(),
+		layer.NewSiLU(),
 		layer.NewLinear(64, 32),
-		layer.NewReLU(),
+		layer.NewSiLU(),
 		layer.NewLinear(32, 3),
 		layer.NewSoftmax(),
 	)
@@ -75,7 +80,7 @@ func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLos
 
 		for _, batch := range batches {
 			model.GetOptimizer().ZeroGrad()
-			
+
 			preds := model.Forward(batch.Features)
 			lossVal := criterion.Forward(preds, batch.Targets)
 			grad := criterion.Backward()
@@ -95,8 +100,8 @@ func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLos
 	correct := 0
 	rows, _ := x_test.Dims()
 	for i := 0; i < rows; i++ {
-		predictedClass := getMaxIndexRow(preds, i)
-		actualClass := getMaxIndexRow(y_test, i)
+		predictedClass := utils.GetMaxIndexRow(preds, i)
+		actualClass := utils.GetMaxIndexRow(y_test, i)
 		if predictedClass == actualClass {
 			correct++
 		}
@@ -129,8 +134,8 @@ func loadAndUseModel(modelPath string, x_test, y_test *mat.Dense) {
 	correct := 0
 	rows, _ := x_test.Dims()
 	for i := 0; i < rows; i++ {
-		predictedClass := getMaxIndexRow(preds, i)
-		actualClass := getMaxIndexRow(y_test, i)
+		predictedClass := utils.GetMaxIndexRow(preds, i)
+		actualClass := utils.GetMaxIndexRow(y_test, i)
 		if predictedClass == actualClass {
 			correct++
 		}
@@ -138,18 +143,4 @@ func loadAndUseModel(modelPath string, x_test, y_test *mat.Dense) {
 
 	accuracy := float64(correct) / float64(rows) * 100
 	fmt.Printf("Loaded model accuracy: %.2f%% (%d/%d)\n", accuracy, correct, rows)
-}
-
-func getMaxIndexRow(m *mat.Dense, row int) int {
-	_, cols := m.Dims()
-	maxIdx := 0
-	maxVal := m.At(row, 0)
-	for j := 1; j < cols; j++ {
-		val := m.At(row, j)
-		if val > maxVal {
-			maxVal = val
-			maxIdx = j
-		}
-	}
-	return maxIdx
 }
