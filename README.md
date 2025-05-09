@@ -4,7 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/VigyatGoel/gotorch.svg)](https://pkg.go.dev/github.com/VigyatGoel/gotorch)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-GoTorch is a deep learning framework implemented in pure Go, designed for simplicity and educational purposes. It provides the essential building blocks for creating and training neural networks without external dependencies.
+GoTorch is a deep learning framework implemented in pure Go, designed for simplicity and educational purposes. It provides the essential building blocks for creating and training neural networks.
 
 ## Table of Contents
 - [Features](#features)
@@ -25,17 +25,18 @@ GoTorch is a deep learning framework implemented in pure Go, designed for simpli
 - **Pure Go Implementation**: No external C/C++ dependencies or bindings
 - **Key Neural Network Components**:
   - Linear (Dense) layers
-  - Activation functions (ReLU, Sigmoid, Softmax)
+  - Activation functions (ReLU, Sigmoid, Softmax, Leaky Relu, Swish)
   - Loss functions (Cross-Entropy, MSE)
   - Optimizers: SGD(with momentum) and Adam supported
   - Sequential model architecture
 - **Model Persistence**:
-  - Save trained models to disk in JSON-based .gth format
+  - Save trained models to disk in Binary based .gth format
   - Load models to perform inference without retraining
   - Preserves layers, weights, biases, and optimizer configurations
 - **Data Processing**:
   - CSV data loading with automatic feature extraction
   - Training/testing data splitting
+  - Data Normalization
   - Classification and regression support
 - **Modular Design**: Easy to extend with new layers and components
 
@@ -57,20 +58,23 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/VigyatGoel/gotorch/data"
 	layer "github.com/VigyatGoel/gotorch/layers"
 	"github.com/VigyatGoel/gotorch/loss"
 	"github.com/VigyatGoel/gotorch/network"
 	"github.com/VigyatGoel/gotorch/optimizer"
+	"github.com/VigyatGoel/gotorch/utils"
+	"gonum.org/v1/gonum/mat"
 )
 
 const (
-	BatchSize = 32
+	BatchSize = 512
 )
 
 func main() {
-	dataLoader := data.NewDataLoader("cmd/iris.csv", data.Classification, BatchSize)
+	dataLoader := data.NewDataLoader("examples/train.csv", data.Classification, BatchSize)
 	err := dataLoader.Load()
 	if err != nil {
 		log.Fatalf("Error loading data: %v", err)
@@ -88,13 +92,13 @@ func main() {
 
 	model := createModel(numFeatures)
 	criterion := loss.NewCrossEntropyLoss()
-	epochs := 20
+	epochs := 50
 
 	fmt.Println("\nTRAINING WITH ADAM")
 	adamOpt := optimizer.DefaultAdam(0.001)
 	model.SetOptimizer(adamOpt)
 
-	modelPath := "iris_model.gth"
+	modelPath := "saved_model.gth"
 	trainAndEvaluate(model, criterion, dataLoader, x_train, y_train, x_test, y_test, epochs, modelPath)
 
 	loadAndUseModel(modelPath, x_test, y_test)
@@ -103,11 +107,10 @@ func main() {
 func createModel(inputFeatures int) *network.Sequential {
 	return network.NewSequential(
 		layer.NewLinear(inputFeatures, 128),
-		layer.NewReLU(),
 		layer.NewLinear(128, 64),
-		layer.NewReLU(),
+		layer.NewSiLU(),
 		layer.NewLinear(64, 32),
-		layer.NewReLU(),
+		layer.NewSiLU(),
 		layer.NewLinear(32, 3),
 		layer.NewSoftmax(),
 	)
@@ -115,12 +118,18 @@ func createModel(inputFeatures int) *network.Sequential {
 
 func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLoss,
 	dataLoader *data.DataLoader,
-	x_train, y_train, x_test, y_test [][]float64, epochs int, modelPath string) {
-	for epoch := range epochs {
+	x_train, y_train, x_test, y_test *mat.Dense, epochs int, modelPath string) {
+
+	startTime := time.Now()
+
+	for epoch := 0; epoch < epochs; epoch++ {
 		epochLoss := 0.0
+		batchStartTime := time.Now()
 		batches := dataLoader.GetBatches(x_train, y_train, epoch)
 
 		for _, batch := range batches {
+			model.GetOptimizer().ZeroGrad()
+
 			preds := model.Forward(batch.Features)
 			lossVal := criterion.Forward(preds, batch.Targets)
 			grad := criterion.Backward()
@@ -129,21 +138,26 @@ func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLos
 		}
 
 		avgEpochLoss := epochLoss / float64(len(batches))
-		fmt.Printf("Epoch [%d/%d] Average Loss: %.4f\n", epoch+1, epochs, avgEpochLoss)
+		epochTime := time.Since(batchStartTime).Seconds()
+		fmt.Printf("Epoch [%d/%d] Average Loss: %.4f (%.2f sec)\n", epoch+1, epochs, avgEpochLoss, epochTime)
 	}
+
+	totalTime := time.Since(startTime).Seconds()
+	fmt.Printf("Training completed in %.2f seconds\n", totalTime)
 
 	preds := model.Predict(x_test)
 	correct := 0
-	for i := range x_test {
-		predictedClass := getMaxIndex(preds[i])
-		actualClass := getMaxIndex(y_test[i])
+	rows, _ := x_test.Dims()
+	for i := 0; i < rows; i++ {
+		predictedClass := utils.GetMaxIndexRow(preds, i)
+		actualClass := utils.GetMaxIndexRow(y_test, i)
 		if predictedClass == actualClass {
 			correct++
 		}
 	}
 
-	accuracy := float64(correct) / float64(len(x_test)) * 100
-	fmt.Printf("Accuracy: %.2f%% (%d/%d)\n", accuracy, correct, len(x_test))
+	accuracy := float64(correct) / float64(rows) * 100
+	fmt.Printf("Accuracy: %.2f%% (%d/%d)\n", accuracy, correct, rows)
 
 	if modelPath != "" {
 		err := model.Save(modelPath)
@@ -155,7 +169,7 @@ func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLos
 	}
 }
 
-func loadAndUseModel(modelPath string, x_test, y_test [][]float64) {
+func loadAndUseModel(modelPath string, x_test, y_test *mat.Dense) {
 	fmt.Printf("\nLoading model from %s\n", modelPath)
 	loadedModel, err := network.Load(modelPath)
 	if err != nil {
@@ -167,30 +181,17 @@ func loadAndUseModel(modelPath string, x_test, y_test [][]float64) {
 
 	preds := loadedModel.Predict(x_test)
 	correct := 0
-	for i := range x_test {
-		predictedClass := getMaxIndex(preds[i])
-		actualClass := getMaxIndex(y_test[i])
+	rows, _ := x_test.Dims()
+	for i := 0; i < rows; i++ {
+		predictedClass := utils.GetMaxIndexRow(preds, i)
+		actualClass := utils.GetMaxIndexRow(y_test, i)
 		if predictedClass == actualClass {
 			correct++
 		}
 	}
 
-	accuracy := float64(correct) / float64(len(x_test)) * 100
-	fmt.Printf("Loaded model accuracy: %.2f%% (%d/%d)\n", accuracy, correct, len(x_test))
-}
-
-func getMaxIndex(values []float64) int {
-	maxIdx := 0
-	maxVal := values[0]
-
-	for i, val := range values {
-		if val > maxVal {
-			maxVal = val
-			maxIdx = i
-		}
-	}
-
-	return maxIdx
+	accuracy := float64(correct) / float64(rows) * 100
+	fmt.Printf("Loaded model accuracy: %.2f%% (%d/%d)\n", accuracy, correct, rows)
 }
 ```
 
