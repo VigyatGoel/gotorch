@@ -6,7 +6,6 @@ import (
 	"gonum.org/v1/gonum/mat"
 )
 
-
 func Zeros(rows, cols int) *mat.Dense {
 	return mat.NewDense(rows, cols, nil)
 }

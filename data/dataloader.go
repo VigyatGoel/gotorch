@@ -18,19 +18,29 @@ type DataType int
 const (
 	Classification DataType = iota
 	Regression
+	ImageClassification // Added for image dataset support
 )
 
+type ImageSample struct {
+	Path     string
+	ClassIdx int
+}
+
 type DataLoader struct {
-	FilePath    string
-	DataType    DataType
-	Shuffle     bool
-	Seed        int64
-	SplitRatio  float64
-	BatchSize   int
-	Features    *mat.Dense
-	Targets     *mat.Dense
-	ClassNames  []string
-	ColumnNames []string
+	FilePath     string
+	DataType     DataType
+	Shuffle      bool
+	Seed         int64
+	SplitRatio   float64
+	BatchSize    int
+	Features     *mat.Dense
+	Targets      *mat.Dense
+	ClassNames   []string
+	ColumnNames  []string
+	ImageDir     string
+	ImageSamples []ImageSample
+	ImageWidth   int
+	ImageHeight  int
 }
 
 type Batch struct {
@@ -51,6 +61,34 @@ func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoade
 }
 
 func (dl *DataLoader) Load() error {
+	if dl.DataType == ImageClassification {
+		if dl.ImageDir == "" {
+			return fmt.Errorf("ImageDir must be set for ImageClassification")
+		}
+		if len(dl.ClassNames) == 0 {
+			classNames, err := GetClassNamesFromDir(dl.ImageDir)
+			if err != nil {
+				return fmt.Errorf("failed to get class names: %w", err)
+			}
+			dl.ClassNames = classNames
+		}
+		samples, err := LoadImagePathsAndLabels(dl.ImageDir, dl.ClassNames)
+		if err != nil {
+			return fmt.Errorf("failed to load image paths: %w", err)
+		}
+		dl.ImageSamples = samples
+		if dl.Shuffle {
+			r := rand.New(rand.NewSource(dl.Seed))
+			r.Shuffle(len(dl.ImageSamples), func(i, j int) {
+				dl.ImageSamples[i], dl.ImageSamples[j] = dl.ImageSamples[j], dl.ImageSamples[i]
+			})
+		}
+		if dl.SplitRatio <= 0 || dl.SplitRatio >= 1 {
+			dl.SplitRatio = 0.8
+		}
+		return nil
+	}
+
 	file, err := os.Open(dl.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
@@ -209,6 +247,59 @@ func (dl *DataLoader) GetBatches(features *mat.Dense, targets *mat.Dense, epoch 
 		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
 	}
 
+	return batches
+}
+
+func (dl *DataLoader) GetImageBatches(epoch int, batchSize int) []Batch {
+	total := len(dl.ImageSamples)
+	indices := make([]int, total)
+	for i := 0; i < total; i++ {
+		indices[i] = i
+	}
+	if dl.Shuffle {
+		epochSeed := dl.Seed + int64(epoch)
+		r := rand.New(rand.NewSource(epochSeed))
+		r.Shuffle(total, func(i, j int) {
+			indices[i], indices[j] = indices[j], indices[i]
+		})
+	}
+	numBatches := int(math.Ceil(float64(total) / float64(batchSize)))
+	batches := make([]Batch, 0, numBatches)
+	for i := 0; i < total; i += batchSize {
+		end := i + batchSize
+		if end > total {
+			end = total
+		}
+		var features []*mat.Dense
+		labels := make([][]float64, 0, end-i)
+		for _, idx := range indices[i:end] {
+			sample := dl.ImageSamples[idx]
+			imgMat, err := LoadImageGrayscale(sample.Path, dl.ImageWidth, dl.ImageHeight)
+			if err != nil {
+				continue
+			}
+			features = append(features, imgMat)
+			label := make([]float64, len(dl.ClassNames))
+			label[sample.ClassIdx] = 1.0
+			labels = append(labels, label)
+		}
+		if len(features) == 0 {
+			continue
+		}
+		rows := len(features)
+		cols := features[0].RawMatrix().Cols
+		featuresData := make([]float64, 0, rows*cols)
+		for _, f := range features {
+			featuresData = append(featuresData, f.RawMatrix().Data...)
+		}
+		labelsData := make([]float64, 0, len(labels)*len(dl.ClassNames))
+		for _, l := range labels {
+			labelsData = append(labelsData, l...)
+		}
+		batchFeatures := mat.NewDense(rows, cols, featuresData)
+		batchTargets := mat.NewDense(rows, len(dl.ClassNames), labelsData)
+		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
+	}
 	return batches
 }
 

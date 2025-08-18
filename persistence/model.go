@@ -87,24 +87,24 @@ func SaveModel(model ModelInterface, filePath string) error {
 		}
 
 		switch layerType {
-			case "Linear":
-				linear, _ := l.(*layer.Linear)
-				wData, wRows, wCols := matDenseToSerializable(linear.GetWeights())
-				bData, bRows, bCols := matDenseToSerializable(linear.GetBiases())
-				layerConfig.InFeatures = wRows
-				layerConfig.OutFeatures = wCols
-				layerConfig.Weights = wData
-				layerConfig.WeightRows = wRows
-				layerConfig.WeightCols = wCols
-				layerConfig.Biases = bData
-				layerConfig.BiasRows = bRows
-				layerConfig.BiasCols = bCols
+		case "Linear":
+			linear, _ := l.(*layer.Linear)
+			wData, wRows, wCols := matDenseToSerializable(linear.GetWeights())
+			bData, bRows, bCols := matDenseToSerializable(linear.GetBiases())
+			layerConfig.InFeatures = wRows
+			layerConfig.OutFeatures = wCols
+			layerConfig.Weights = wData
+			layerConfig.WeightRows = wRows
+			layerConfig.WeightCols = wCols
+			layerConfig.Biases = bData
+			layerConfig.BiasRows = bRows
+			layerConfig.BiasCols = bCols
 
-			case "LeakyReLU":
-				leaky, _ := l.(*layer.LeakyReLU)
-				layerConfig.Alpha = leaky.Alpha
+		case "LeakyReLU":
+			leaky, _ := l.(*layer.LeakyReLU)
+			layerConfig.Alpha = leaky.Alpha
 
-			case "ReLU", "Sigmoid", "Softmax", "SiLU":
+		case "ReLU", "Sigmoid", "Softmax", "SiLU":
 		}
 
 		modelConfig.Layers[i] = layerConfig
