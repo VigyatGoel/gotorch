@@ -1,31 +1,39 @@
 package layer
 
 import (
+	"math"
 	"math/rand"
 
-	"gonum.org/v1/gonum/mat"
+	"gorgonia.org/tensor"
 )
 
 var rng = rand.New(rand.NewSource(42))
 
 type Linear struct {
-	inputMat   *mat.Dense
-	weightMat  *mat.Dense
-	biasMat    *mat.Dense
-	dWeightMat *mat.Dense
-	dBiasMat   *mat.Dense
+	inputMat   *tensor.Dense
+	weightMat  *tensor.Dense
+	biasMat    *tensor.Dense
+	dWeightMat *tensor.Dense
+	dBiasMat   *tensor.Dense
 }
 
 func NewLinear(inFeatures, outFeatures int) *Linear {
-	weightMat := mat.NewDense(inFeatures, outFeatures, nil)
-	biasMat := mat.NewDense(1, outFeatures, nil)
-	for i := 0; i < inFeatures; i++ {
-		for j := 0; j < outFeatures; j++ {
-			weightMat.Set(i, j, rng.Float64()*2-1)
-		}
+	// Initialize weights with Xavier/Glorot initialization
+	weightData := make([]float64, inFeatures*outFeatures)
+	limit := math.Sqrt(6.0 / float64(inFeatures+outFeatures))
+	for i := range weightData {
+		weightData[i] = (rng.Float64()*2 - 1) * limit
 	}
-	dWeightMat := mat.NewDense(inFeatures, outFeatures, nil)
-	dBiasMat := mat.NewDense(1, outFeatures, nil)
+	weightMat := tensor.New(tensor.WithShape(inFeatures, outFeatures), tensor.WithBacking(weightData))
+
+	// Initialize biases with zeros
+	biasData := make([]float64, outFeatures)
+	biasMat := tensor.New(tensor.WithShape(1, outFeatures), tensor.WithBacking(biasData))
+
+	// Initialize gradient tensors
+	dWeightMat := tensor.New(tensor.WithShape(inFeatures, outFeatures), tensor.WithBacking(make([]float64, inFeatures*outFeatures)))
+	dBiasMat := tensor.New(tensor.WithShape(1, outFeatures), tensor.WithBacking(make([]float64, outFeatures)))
+
 	return &Linear{
 		weightMat:  weightMat,
 		biasMat:    biasMat,
@@ -34,70 +42,95 @@ func NewLinear(inFeatures, outFeatures int) *Linear {
 	}
 }
 
-func (l *Linear) Forward(x *mat.Dense) *mat.Dense {
+func (l *Linear) Forward(x *tensor.Dense) *tensor.Dense {
 	l.inputMat = x
-	rows, _ := x.Dims()
-	_, cols := l.weightMat.Dims()
-	result := mat.NewDense(rows, cols, nil)
-	result.Mul(x, l.weightMat)
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			result.Set(i, j, result.At(i, j)+l.biasMat.At(0, j))
-		}
+	
+	// Matrix multiplication: x * weightMat
+	result, err := tensor.MatMul(x, l.weightMat)
+	if err != nil {
+		panic(err)
 	}
-	return result
+	
+	// Get the result shape
+	resultShape := result.Shape()
+	batchSize := resultShape[0]
+	
+	// Create a bias tensor with the same shape as result by repeating the bias
+	biasData := l.biasMat.Data().([]float64)
+	expandedBiasData := make([]float64, batchSize*len(biasData))
+	for i := 0; i < batchSize; i++ {
+		copy(expandedBiasData[i*len(biasData):(i+1)*len(biasData)], biasData)
+	}
+	
+	// Create the expanded bias tensor
+	expandedBias := tensor.New(tensor.WithShape(resultShape...), tensor.WithBacking(expandedBiasData))
+	
+	// Add bias
+	resultWithBias, err := tensor.Add(result, expandedBias)
+	if err != nil {
+		panic(err)
+	}
+	
+	return resultWithBias.(*tensor.Dense)
 }
 
-func (l *Linear) Backward(gradOutput *mat.Dense) *mat.Dense {
-	inputRows, inputCols := l.inputMat.Dims()
-	inputT := mat.NewDense(inputCols, inputRows, nil)
-	for i := 0; i < inputRows; i++ {
-		for j := 0; j < inputCols; j++ {
-			inputT.Set(j, i, l.inputMat.At(i, j))
+func (l *Linear) Backward(gradOutput *tensor.Dense) *tensor.Dense {
+	// Calculate weight gradients: input.T * gradOutput
+	inputT, _ := tensor.Transpose(l.inputMat)
+	weightGrad, _ := tensor.MatMul(inputT, gradOutput)
+	l.dWeightMat = weightGrad.(*tensor.Dense)
+	
+	// Calculate bias gradients: sum(gradOutput, axis=0)
+	gradShape := gradOutput.Shape()
+	if len(gradShape) > 1 {
+		axis := make([]int, len(gradShape)-1)
+		for i := 0; i < len(axis); i++ {
+			axis[i] = i
 		}
-	}
-	l.dWeightMat.Mul(inputT, gradOutput)
-	rows, cols := gradOutput.Dims()
-	l.dBiasMat.Zero()
-	for j := 0; j < cols; j++ {
-		var sum float64
-		for i := 0; i < rows; i++ {
-			sum += gradOutput.At(i, j)
+		biasGrad, _ := tensor.Sum(gradOutput, axis...)
+		if bd, ok := biasGrad.(*tensor.Dense); ok {
+			l.dBiasMat = bd
+		} else {
+			// Handle case where Sum returns a different type
+			biasData := biasGrad.Data().([]float64)
+			origShape := biasGrad.Shape()
+			l.dBiasMat = tensor.New(tensor.WithShape(origShape...), tensor.WithBacking(biasData))
 		}
-		l.dBiasMat.Set(0, j, sum)
+		// Ensure bias gradient has the right shape (1, outFeatures)
+		l.dBiasMat.Reshape(1, l.dBiasMat.Shape()[len(l.dBiasMat.Shape())-1])
+	} else {
+		// If gradOutput is 1D, just copy it
+		l.dBiasMat = gradOutput.Clone().(*tensor.Dense)
+		l.dBiasMat.Reshape(1, gradOutput.Shape()[0])
 	}
-	weightRows, weightCols := l.weightMat.Dims()
-	weightT := mat.NewDense(weightCols, weightRows, nil)
-	for i := 0; i < weightRows; i++ {
-		for j := 0; j < weightCols; j++ {
-			weightT.Set(j, i, l.weightMat.At(i, j))
-		}
-	}
-	gradInputMat := mat.NewDense(rows, weightT.RawMatrix().Cols, nil)
-	gradInputMat.Mul(gradOutput, weightT)
-	return gradInputMat
+	
+	// Calculate input gradients: gradOutput * weightMat.T
+	weightT, _ := tensor.Transpose(l.weightMat)
+	gradInputMat, _ := tensor.MatMul(gradOutput, weightT)
+	
+	return gradInputMat.(*tensor.Dense)
 }
 
-func (l *Linear) GetWeights() *mat.Dense {
+func (l *Linear) GetWeights() *tensor.Dense {
 	return l.weightMat
 }
 
-func (l *Linear) GetGradients() *mat.Dense {
+func (l *Linear) GetGradients() *tensor.Dense {
 	return l.dWeightMat
 }
 
-func (l *Linear) UpdateWeights(weightsUpdate *mat.Dense) {
-	l.weightMat.CloneFrom(weightsUpdate)
+func (l *Linear) UpdateWeights(weightsUpdate *tensor.Dense) {
+	l.weightMat = weightsUpdate.Clone().(*tensor.Dense)
 }
 
-func (l *Linear) GetBiases() *mat.Dense {
+func (l *Linear) GetBiases() *tensor.Dense {
 	return l.biasMat
 }
 
-func (l *Linear) GetBiasGradients() *mat.Dense {
+func (l *Linear) GetBiasGradients() *tensor.Dense {
 	return l.dBiasMat
 }
 
-func (l *Linear) UpdateBiases(biasUpdate *mat.Dense) {
-	l.biasMat.CloneFrom(biasUpdate)
+func (l *Linear) UpdateBiases(biasUpdate *tensor.Dense) {
+	l.biasMat = biasUpdate.Clone().(*tensor.Dense)
 }

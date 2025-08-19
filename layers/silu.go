@@ -1,38 +1,61 @@
 package layer
 
 import (
-	"github.com/VigyatGoel/gotorch/utils"
-	"gonum.org/v1/gonum/mat"
+	"math"
+	"gorgonia.org/tensor"
 )
 
 type SiLU struct {
-	output *mat.Dense
+	input  *tensor.Dense
+	output *tensor.Dense
 }
 
 func NewSiLU() *SiLU {
 	return &SiLU{}
 }
 
-func (s *SiLU) Forward(x *mat.Dense) *mat.Dense {
-	s.output = utils.ApplyFuncDense(x, utils.SiLU)
+func (s *SiLU) Forward(x *tensor.Dense) *tensor.Dense {
+	// Store input for backward pass
+	s.input = x.Clone().(*tensor.Dense)
+	
+	// SiLU (Swish): x * sigmoid(x)
+	s.output = x.Clone().(*tensor.Dense)
+	data := s.output.Data().([]float64)
+	inputData := s.input.Data().([]float64)
+	
+	for i, v := range inputData {
+		// sigmoid(x) = 1 / (1 + exp(-x))
+		sigmoid := 1.0 / (1.0 + math.Exp(-v))
+		// x * sigmoid(x)
+		data[i] = v * sigmoid
+	}
 	return s.output
 }
 
-func (s *SiLU) Backward(gradOutput *mat.Dense) *mat.Dense {
-	rows, cols := s.output.Dims()
-	grad := mat.NewDense(rows, cols, nil)
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			deriv := utils.SiLUDerivative(s.output.At(i, j))
-			grad.Set(i, j, gradOutput.At(i, j)*deriv)
-		}
+func (s *SiLU) Backward(gradOutput *tensor.Dense) *tensor.Dense {
+	// Derivative of SiLU: sigmoid(x) + x * sigmoid(x) * (1 - sigmoid(x))
+	// We need the original input values to compute this correctly
+	inputData := s.input.Data().([]float64)
+	gradData := gradOutput.Data().([]float64)
+	
+	resultData := make([]float64, len(gradData))
+	
+	for i, x := range inputData {
+		// Compute sigmoid(x)
+		sigmoid := 1.0 / (1.0 + math.Exp(-x))
+		// Compute derivative: sigmoid(x) + x * sigmoid(x) * (1 - sigmoid(x))
+		deriv := sigmoid + x*sigmoid*(1-sigmoid)
+		// Multiply by upstream gradient
+		resultData[i] = deriv * gradData[i]
 	}
-	return grad
+	
+	result := tensor.New(tensor.WithShape(gradOutput.Shape()...), tensor.WithBacking(resultData))
+	return result
 }
 
-func (s *SiLU) GetWeights() *mat.Dense                 { return nil }
-func (s *SiLU) GetGradients() *mat.Dense               { return nil }
-func (s *SiLU) UpdateWeights(weightsUpdate *mat.Dense) {}
-func (s *SiLU) GetBiases() *mat.Dense                  { return nil }
-func (s *SiLU) GetBiasGradients() *mat.Dense           { return nil }
-func (s *SiLU) UpdateBiases(biasUpdate *mat.Dense)     {}
+func (s *SiLU) GetWeights() *tensor.Dense                    { return nil }
+func (s *SiLU) GetGradients() *tensor.Dense                  { return nil }
+func (s *SiLU) UpdateWeights(weightsUpdate *tensor.Dense)    {}
+func (s *SiLU) GetBiases() *tensor.Dense                     { return nil }
+func (s *SiLU) GetBiasGradients() *tensor.Dense              { return nil }
+func (s *SiLU) UpdateBiases(biasUpdate *tensor.Dense)        {}

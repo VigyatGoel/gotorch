@@ -1,16 +1,16 @@
 package layer
 
-import "gonum.org/v1/gonum/mat"
+import "gorgonia.org/tensor"
 
 type Layer interface {
-	Forward(input *mat.Dense) *mat.Dense
-	Backward(dout *mat.Dense) *mat.Dense
+	Forward(input *tensor.Dense) *tensor.Dense
+	Backward(dout *tensor.Dense) *tensor.Dense
 
-	GetWeights() *mat.Dense
-	GetGradients() *mat.Dense
-	UpdateWeights(weightsUpdate *mat.Dense)
+	GetWeights() *tensor.Dense
+	GetGradients() *tensor.Dense
+	UpdateWeights(weightsUpdate *tensor.Dense)
 
-	GetBiases() *mat.Dense
-	GetBiasGradients() *mat.Dense
-	UpdateBiases(biasUpdate *mat.Dense)
+	GetBiases() *tensor.Dense
+	GetBiasGradients() *tensor.Dense
+	UpdateBiases(biasUpdate *tensor.Dense)
 }

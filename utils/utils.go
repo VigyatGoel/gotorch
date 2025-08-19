@@ -3,83 +3,63 @@ package utils
 import (
 	"math"
 
-	"gonum.org/v1/gonum/mat"
+	"gorgonia.org/tensor"
 )
 
-func Zeros(rows, cols int) *mat.Dense {
-	return mat.NewDense(rows, cols, nil)
+func Zeros(shape ...int) *tensor.Dense {
+	size := 1
+	for _, dim := range shape {
+		size *= dim
+	}
+	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(make([]float64, size)))
 }
 
-func Ones(rows, cols int) *mat.Dense {
-	data := make([]float64, rows*cols)
+func Ones(shape ...int) *tensor.Dense {
+	size := 1
+	for _, dim := range shape {
+		size *= dim
+	}
+	data := make([]float64, size)
 	for i := range data {
 		data[i] = 1.0
 	}
-	return mat.NewDense(rows, cols, data)
+	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(data))
 }
 
-func Dot(a, b *mat.Dense) *mat.Dense {
-	aRows, aCols := a.Dims()
-	bRows, bCols := b.Dims()
-
-	if aCols != bRows {
+func Dot(a, b *tensor.Dense) *tensor.Dense {
+	result, err := tensor.MatMul(a, b)
+	if err != nil {
 		panic("Dimension mismatch for matrix multiplication")
 	}
-
-	result := mat.NewDense(aRows, bCols, nil)
-	result.Mul(a, b)
-	return result
+	return result.(*tensor.Dense)
 }
 
-func Add(a, b *mat.Dense) *mat.Dense {
-	aRows, aCols := a.Dims()
-	bRows, bCols := b.Dims()
-
-	if bRows == 1 && aRows > 1 {
-		result := mat.NewDense(aRows, aCols, nil)
-		aRaw := a.RawMatrix()
-		bRaw := b.RawMatrix()
-		resultRaw := result.RawMatrix()
-		for i := 0; i < aRows; i++ {
-			for j := 0; j < aCols; j++ {
-				resultRaw.Data[i*resultRaw.Stride+j] = aRaw.Data[i*aRaw.Stride+j] + bRaw.Data[j]
-			}
-		}
-		return result
+func Add(a, b *tensor.Dense) *tensor.Dense {
+	result, err := tensor.Add(a, b)
+	if err != nil {
+		panic("Dimension mismatch for tensor addition")
 	}
-
-	if aRows != bRows || aCols != bCols {
-		panic("Dimension mismatch for matrix addition")
-	}
-
-	result := mat.NewDense(aRows, aCols, nil)
-	result.Add(a, b)
-	return result
+	return result.(*tensor.Dense)
 }
 
-func Transpose(a *mat.Dense) *mat.Dense {
-	rows, cols := a.Dims()
-	result := mat.NewDense(cols, rows, nil)
-	aRaw := a.RawMatrix()
-	resultRaw := result.RawMatrix()
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			resultRaw.Data[j*resultRaw.Stride+i] = aRaw.Data[i*aRaw.Stride+j]
-		}
+func Transpose(a *tensor.Dense) *tensor.Dense {
+	result, err := tensor.Transpose(a)
+	if err != nil {
+		panic("Error transposing tensor")
+	}
+	return result.(*tensor.Dense)
+}
+
+func ApplyFunc(a *tensor.Dense, f func(float64) float64) *tensor.Dense {
+	result := a.Clone().(*tensor.Dense)
+	data := result.Data().([]float64)
+	for i, v := range data {
+		data[i] = f(v)
 	}
 	return result
 }
 
-func ApplyFunc(a *mat.Dense, f func(float64) float64) *mat.Dense {
-	rows, cols := a.Dims()
-	result := mat.NewDense(rows, cols, nil)
-	result.Apply(func(_, _ int, v float64) float64 {
-		return f(v)
-	}, a)
-	return result
-}
-
-func ApplyFuncDense(a *mat.Dense, f func(float64) float64) *mat.Dense {
+func ApplyFuncDense(a *tensor.Dense, f func(float64) float64) *tensor.Dense {
 	return ApplyFunc(a, f)
 }
 
@@ -129,42 +109,79 @@ func SiLUDerivative(x float64) float64 {
 	return s + (x * s * (1 - s))
 }
 
-func Softmax(logits *mat.Dense) *mat.Dense {
-	rows, cols := logits.Dims()
-	result := mat.NewDense(rows, cols, nil)
-	logitsRaw := logits.RawMatrix()
-	resultRaw := result.RawMatrix()
-	for i := 0; i < rows; i++ {
-		maxVal := logitsRaw.Data[i*logitsRaw.Stride]
-		for j := 1; j < cols; j++ {
-			val := logitsRaw.Data[i*logitsRaw.Stride+j]
-			if val > maxVal {
-				maxVal = val
+func Softmax(logits *tensor.Dense) *tensor.Dense {
+	result := logits.Clone().(*tensor.Dense)
+	
+	// Get data slice
+	data := result.Data().([]float64)
+	shape := result.Shape()
+	
+	// For 2D tensor, apply softmax along the last dimension (columns)
+	if len(shape) == 2 {
+		rows, cols := shape[0], shape[1]
+		for i := 0; i < rows; i++ {
+			// Find max value for numerical stability
+			maxVal := data[i*cols]
+			for j := 1; j < cols; j++ {
+				if data[i*cols+j] > maxVal {
+					maxVal = data[i*cols+j]
+				}
+			}
+			
+			// Calculate sum of exponentials
+			sum := 0.0
+			for j := 0; j < cols; j++ {
+				data[i*cols+j] = math.Exp(data[i*cols+j] - maxVal)
+				sum += data[i*cols+j]
+			}
+			
+			// Normalize
+			for j := 0; j < cols; j++ {
+				data[i*cols+j] /= sum
 			}
 		}
-		sum := 0.0
-		expValues := make([]float64, cols)
-		for j := 0; j < cols; j++ {
-			expValues[j] = math.Exp(logitsRaw.Data[i*logitsRaw.Stride+j] - maxVal)
-			sum += expValues[j]
+	} else {
+		// For 1D tensor
+		maxVal := data[0]
+		for i := 1; i < len(data); i++ {
+			if data[i] > maxVal {
+				maxVal = data[i]
+			}
 		}
-		for j := 0; j < cols; j++ {
-			resultRaw.Data[i*resultRaw.Stride+j] = expValues[j] / sum
+		
+		sum := 0.0
+		for i := 0; i < len(data); i++ {
+			data[i] = math.Exp(data[i] - maxVal)
+			sum += data[i]
+		}
+		
+		for i := 0; i < len(data); i++ {
+			data[i] /= sum
 		}
 	}
+	
 	return result
 }
 
-func SoftmaxDense(logits *mat.Dense) *mat.Dense {
+func SoftmaxDense(logits *tensor.Dense) *tensor.Dense {
 	return Softmax(logits)
 }
 
-func GetMaxIndexRow(m *mat.Dense, row int) int {
-	_, cols := m.Dims()
+func GetMaxIndexRow(m *tensor.Dense, row int) int {
+	shape := m.Shape()
+	cols := shape[len(shape)-1]
+	
+	data := m.Data().([]float64)
+	
+	// Calculate the starting index for this row
+	startIdx := row * cols
+	
 	maxIdx := 0
-	maxVal := m.At(row, 0)
+	maxVal := data[startIdx]
+	
 	for j := 1; j < cols; j++ {
-		val := m.At(row, j)
+		val := data[startIdx+j]
+
 		if val > maxVal {
 			maxVal = val
 			maxIdx = j

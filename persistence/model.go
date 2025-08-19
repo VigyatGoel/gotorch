@@ -11,22 +11,27 @@ import (
 
 	layer "github.com/VigyatGoel/gotorch/layers"
 	"github.com/VigyatGoel/gotorch/optimizer"
-	"gonum.org/v1/gonum/mat"
+	"gorgonia.org/tensor"
 )
 
-func matDenseToSerializable(m *mat.Dense) (data []float64, rows, cols int) {
-	if m == nil {
-		return nil, 0, 0
+func tensorDenseToSerializable(t *tensor.Dense) (data []float64, shape []int) {
+	if t == nil {
+		return nil, nil
 	}
-	rows, cols = m.Dims()
-	return m.RawMatrix().Data, rows, cols
+	shape = t.Shape()
+	data = make([]float64, len(t.Data().([]float64)))
+	copy(data, t.Data().([]float64))
+	return data, shape
 }
 
-func serializableToMatDense(data []float64, rows, cols int) *mat.Dense {
-	if data == nil || rows == 0 || cols == 0 {
+func serializableToTensorDense(data []float64, shape []int) *tensor.Dense {
+	if data == nil || len(shape) == 0 {
 		return nil
 	}
-	return mat.NewDense(rows, cols, data)
+	// Create a copy of the data to avoid sharing memory
+	dataCopy := make([]float64, len(data))
+	copy(dataCopy, data)
+	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(dataCopy))
 }
 
 type ModelInterface interface {
@@ -39,11 +44,9 @@ type LayerConfig struct {
 	InFeatures  int       `json:"in_features,omitempty"`
 	OutFeatures int       `json:"out_features,omitempty"`
 	Weights     []float64 `json:"weights,omitempty"`
-	WeightRows  int       `json:"weight_rows,omitempty"`
-	WeightCols  int       `json:"weight_cols,omitempty"`
+	WeightShape []int     `json:"weight_shape,omitempty"`
 	Biases      []float64 `json:"biases,omitempty"`
-	BiasRows    int       `json:"bias_rows,omitempty"`
-	BiasCols    int       `json:"bias_cols,omitempty"`
+	BiasShape   []int     `json:"bias_shape,omitempty"`
 	Alpha       float64   `json:"alpha,omitempty"`
 }
 
@@ -89,16 +92,16 @@ func SaveModel(model ModelInterface, filePath string) error {
 		switch layerType {
 		case "Linear":
 			linear, _ := l.(*layer.Linear)
-			wData, wRows, wCols := matDenseToSerializable(linear.GetWeights())
-			bData, bRows, bCols := matDenseToSerializable(linear.GetBiases())
-			layerConfig.InFeatures = wRows
-			layerConfig.OutFeatures = wCols
+			wData, wShape := tensorDenseToSerializable(linear.GetWeights())
+			bData, bShape := tensorDenseToSerializable(linear.GetBiases())
+			if len(wShape) == 2 {
+				layerConfig.InFeatures = wShape[0]
+				layerConfig.OutFeatures = wShape[1]
+			}
 			layerConfig.Weights = wData
-			layerConfig.WeightRows = wRows
-			layerConfig.WeightCols = wCols
+			layerConfig.WeightShape = wShape
 			layerConfig.Biases = bData
-			layerConfig.BiasRows = bRows
-			layerConfig.BiasCols = bCols
+			layerConfig.BiasShape = bShape
 
 		case "LeakyReLU":
 			leaky, _ := l.(*layer.LeakyReLU)
@@ -161,11 +164,11 @@ func LoadModelData(filePath string) (*ModelData, error) {
 		switch layerConfig.Type {
 		case "Linear":
 			linear := layer.NewLinear(layerConfig.InFeatures, layerConfig.OutFeatures)
-			if layerConfig.Weights != nil && layerConfig.WeightRows > 0 && layerConfig.WeightCols > 0 {
-				linear.UpdateWeights(serializableToMatDense(layerConfig.Weights, layerConfig.WeightRows, layerConfig.WeightCols))
+			if layerConfig.Weights != nil && len(layerConfig.WeightShape) > 0 {
+				linear.UpdateWeights(serializableToTensorDense(layerConfig.Weights, layerConfig.WeightShape))
 			}
-			if layerConfig.Biases != nil && layerConfig.BiasRows > 0 && layerConfig.BiasCols > 0 {
-				linear.UpdateBiases(serializableToMatDense(layerConfig.Biases, layerConfig.BiasRows, layerConfig.BiasCols))
+			if layerConfig.Biases != nil && len(layerConfig.BiasShape) > 0 {
+				linear.UpdateBiases(serializableToTensorDense(layerConfig.Biases, layerConfig.BiasShape))
 			}
 			newLayer = linear
 

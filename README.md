@@ -50,6 +50,11 @@ go get github.com/VigyatGoel/gotorch
 git clone https://github.com/VigyatGoel/gotorch.git
 ```
 
+After cloning, run:
+```bash
+go mod tidy
+```
+
 ## Quick Start
 
 ```go
@@ -66,7 +71,7 @@ import (
 	"github.com/VigyatGoel/gotorch/network"
 	"github.com/VigyatGoel/gotorch/optimizer"
 	"github.com/VigyatGoel/gotorch/utils"
-	"gonum.org/v1/gonum/mat"
+	"gorgonia.org/tensor"
 )
 
 const (
@@ -118,7 +123,7 @@ func createModel(inputFeatures int) *network.Sequential {
 
 func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLoss,
 	dataLoader *data.DataLoader,
-	x_train, y_train, x_test, y_test *mat.Dense, epochs int, modelPath string) {
+	x_train, y_train, x_test, y_test *tensor.Dense, epochs int, modelPath string) {
 
 	startTime := time.Now()
 
@@ -147,7 +152,8 @@ func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLos
 
 	preds := model.Predict(x_test)
 	correct := 0
-	rows, _ := x_test.Dims()
+	shape := x_test.Shape()
+	rows := shape[0]
 	for i := 0; i < rows; i++ {
 		predictedClass := utils.GetMaxIndexRow(preds, i)
 		actualClass := utils.GetMaxIndexRow(y_test, i)
@@ -169,7 +175,7 @@ func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLos
 	}
 }
 
-func loadAndUseModel(modelPath string, x_test, y_test *mat.Dense) {
+func loadAndUseModel(modelPath string, x_test, y_test *tensor.Dense) {
 	fmt.Printf("\nLoading model from %s\n", modelPath)
 	loadedModel, err := network.Load(modelPath)
 	if err != nil {
@@ -181,7 +187,8 @@ func loadAndUseModel(modelPath string, x_test, y_test *mat.Dense) {
 
 	preds := loadedModel.Predict(x_test)
 	correct := 0
-	rows, _ := x_test.Dims()
+	shape := x_test.Shape()
+	rows := shape[0]
 	for i := 0; i < rows; i++ {
 		predictedClass := utils.GetMaxIndexRow(preds, i)
 		actualClass := utils.GetMaxIndexRow(y_test, i)
@@ -236,8 +243,8 @@ To implement a custom layer, implement the Layer interface:
 
 ```go
 type Layer interface {
-    Forward(input [][]float64) [][]float64
-    Backward(dout [][]float64, learningRate float64) [][]float64
+    Forward(input *tensor.Dense) *tensor.Dense
+    Backward(dout *tensor.Dense) *tensor.Dense
 }
 ```
 

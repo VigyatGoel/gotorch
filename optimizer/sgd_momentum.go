@@ -3,22 +3,22 @@ package optimizer
 import (
 	"fmt"
 
-	"gonum.org/v1/gonum/mat"
+	"gorgonia.org/tensor"
 )
 
 type SGDMomentum struct {
 	LR       float64
 	Momentum float64
-	v        map[string]*mat.Dense
-	vb       map[string]*mat.Dense
+	v        map[string]*tensor.Dense
+	vb       map[string]*tensor.Dense
 }
 
 func NewSGDMomentum(lr float64, momentum float64) *SGDMomentum {
 	return &SGDMomentum{
 		LR:       lr,
 		Momentum: momentum,
-		v:        make(map[string]*mat.Dense),
-		vb:       make(map[string]*mat.Dense),
+		v:        make(map[string]*tensor.Dense),
+		vb:       make(map[string]*tensor.Dense),
 	}
 }
 
@@ -26,70 +26,135 @@ func DefaultSGDMomentum(lr float64) *SGDMomentum {
 	return NewSGDMomentum(lr, 0.9)
 }
 
-func (sgd *SGDMomentum) Step(weights *mat.Dense, gradients *mat.Dense) *mat.Dense {
-	rows, cols := weights.Dims()
-	if rows == 0 || cols == 0 {
+func (sgd *SGDMomentum) Step(weights *tensor.Dense, gradients *tensor.Dense) *tensor.Dense {
+	shape := weights.Shape()
+	if len(shape) == 0 {
 		fmt.Println("SGD optimizer skipping update - empty weights or gradients")
 		return weights
 	}
 
-	gRows, gCols := gradients.Dims()
-	if rows != gRows || cols != gCols {
-		fmt.Printf("SGD optimizer dimension mismatch: weights %dx%d vs gradients %dx%d\n", rows, cols, gRows, gCols)
+	gShape := gradients.Shape()
+	if len(shape) != len(gShape) {
+		fmt.Printf("SGD optimizer dimension mismatch: weights %v vs gradients %v\n", shape, gShape)
 		return weights
 	}
 
-	key := fmt.Sprintf("weights_%dx%d", rows, cols)
-	if _, ok := sgd.v[key]; !ok {
-		sgd.v[key] = mat.NewDense(rows, cols, nil)
-	}
-
-	v := sgd.v[key]
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			v.Set(i, j, sgd.Momentum*v.At(i, j)-sgd.LR*gradients.At(i, j))
-			weights.Set(i, j, weights.At(i, j)+v.At(i, j))
+	for i := range shape {
+		if shape[i] != gShape[i] {
+			fmt.Printf("SGD optimizer dimension mismatch: weights %v vs gradients %v\n", shape, gShape)
+			return weights
 		}
 	}
 
-	return weights
+	key := fmt.Sprintf("weights_%v", shape)
+	if _, ok := sgd.v[key]; !ok {
+		// Initialize velocity tensor with zeros
+		size := 1
+		for _, dim := range shape {
+			size *= dim
+		}
+		zeroData := make([]float64, size)
+		sgd.v[key] = tensor.New(tensor.WithShape(shape...), tensor.WithBacking(zeroData))
+	}
+
+	v := sgd.v[key]
+	weightData := weights.Data().([]float64)
+	gradData := gradients.Data().([]float64)
+	vData := v.Data().([]float64)
+
+	// Create a copy of the weight data to avoid modifying the original tensor
+	updatedWeightData := make([]float64, len(weightData))
+	copy(updatedWeightData, weightData)
+
+	// Create a copy of the velocity data to avoid modifying the original tensor
+	updatedVData := make([]float64, len(vData))
+	copy(updatedVData, vData)
+
+	for i := range updatedWeightData {
+		updatedVData[i] = sgd.Momentum*updatedVData[i] - sgd.LR*gradData[i]
+		updatedWeightData[i] += updatedVData[i]
+	}
+
+	// Update the velocity tensor with the new values
+	copy(v.Data().([]float64), updatedVData)
+
+	// Return a new tensor with updated weights
+	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(updatedWeightData))
 }
 
-func (sgd *SGDMomentum) StepBias(biases *mat.Dense, biasGradients *mat.Dense) *mat.Dense {
+func (sgd *SGDMomentum) StepBias(biases *tensor.Dense, biasGradients *tensor.Dense) *tensor.Dense {
 	if biases == nil || biasGradients == nil {
 		return biases
 	}
 
-	rows, cols := biases.Dims()
-	if rows == 0 || cols == 0 {
+	shape := biases.Shape()
+	if len(shape) == 0 {
 		return biases
 	}
 
-	gRows, gCols := biasGradients.Dims()
-	if rows != gRows || cols != gCols {
-		fmt.Printf("SGD optimizer dimension mismatch: biases %dx%d vs biasGradients %dx%d\n", rows, cols, gRows, gCols)
+	gShape := biasGradients.Shape()
+	if len(shape) != len(gShape) {
+		fmt.Printf("SGD optimizer dimension mismatch: biases %v vs biasGradients %v\n", shape, gShape)
 		return biases
 	}
 
-	key := fmt.Sprintf("bias_%dx%d", rows, cols)
-	if _, ok := sgd.vb[key]; !ok {
-		sgd.vb[key] = mat.NewDense(rows, cols, nil)
-	}
-
-	vb := sgd.vb[key]
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			vb.Set(i, j, sgd.Momentum*vb.At(i, j)-sgd.LR*biasGradients.At(i, j))
-			biases.Set(i, j, biases.At(i, j)+vb.At(i, j))
+	for i := range shape {
+		if shape[i] != gShape[i] {
+			fmt.Printf("SGD optimizer dimension mismatch: biases %v vs biasGradients %v\n", shape, gShape)
+			return biases
 		}
 	}
 
-	return biases
+	key := fmt.Sprintf("bias_%v", shape)
+	if _, ok := sgd.vb[key]; !ok {
+		// Initialize velocity tensor with zeros
+		size := 1
+		for _, dim := range shape {
+			size *= dim
+		}
+		zeroData := make([]float64, size)
+		sgd.vb[key] = tensor.New(tensor.WithShape(shape...), tensor.WithBacking(zeroData))
+	}
+
+	vb := sgd.vb[key]
+	biasData := biases.Data().([]float64)
+	biasGradData := biasGradients.Data().([]float64)
+	vbData := vb.Data().([]float64)
+
+	// Create a copy of the bias data to avoid modifying the original tensor
+	updatedBiasData := make([]float64, len(biasData))
+	copy(updatedBiasData, biasData)
+
+	// Create a copy of the velocity data to avoid modifying the original tensor
+	updatedVBData := make([]float64, len(vbData))
+	copy(updatedVBData, vbData)
+
+	for i := range updatedBiasData {
+		updatedVBData[i] = sgd.Momentum*updatedVBData[i] - sgd.LR*biasGradData[i]
+		updatedBiasData[i] += updatedVBData[i]
+	}
+
+	// Update the velocity tensor with the new values
+	copy(vb.Data().([]float64), updatedVBData)
+
+	// Return a new tensor with updated biases
+	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(updatedBiasData))
 }
 
 func (sgd *SGDMomentum) ZeroGrad() {
-	sgd.v = make(map[string]*mat.Dense)
-	sgd.vb = make(map[string]*mat.Dense)
+	// Reset velocity tensors
+	for _, v := range sgd.v {
+		vData := v.Data().([]float64)
+		for i := range vData {
+			vData[i] = 0.0
+		}
+	}
+	for _, vb := range sgd.vb {
+		vbData := vb.Data().([]float64)
+		for i := range vbData {
+			vbData[i] = 0.0
+		}
+	}
 }
 
 func (sgd *SGDMomentum) GetLearningRate() float64 {

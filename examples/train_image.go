@@ -25,6 +25,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error reading class names: %v", err)
 	}
+	
+	// Create and load the data loader
 	dataLoader := &data.DataLoader{
 		DataType:    data.ImageClassification,
 		ImageDir:    "examples/mnist",
@@ -43,17 +45,8 @@ func main() {
 	numFeatures := IMAGE_WIDTH * IMAGE_HEIGHT // Grayscale images have 1 channel
 	fmt.Printf("Detected %d features from the grayscale image dataset.\n", numFeatures)
 
-	total := len(dataLoader.ImageSamples)
-	split := int(float64(total) * dataLoader.SplitRatio)
-	trainSamples := dataLoader.ImageSamples[:split]
-	testSamples := dataLoader.ImageSamples[split:]
-
-	trainLoader := *dataLoader
-	trainLoader.ImageSamples = trainSamples
-
-	testLoader := *dataLoader
-	testLoader.ImageSamples = testSamples
-
+	// Use the same data loader for both training and testing
+	// The GetImageBatches method will handle the splitting internally based on the SplitRatio
 	model := network.NewSequential(
 		layer.NewLinear(numFeatures, 512),
 		layer.NewLinear(512, 256),
@@ -77,7 +70,8 @@ func main() {
 	for epoch := 0; epoch < epochs; epoch++ {
 		epochLoss := 0.0
 		batchStartTime := time.Now()
-		batches := trainLoader.GetImageBatches(epoch, trainLoader.BatchSize)
+		// Use the data loader directly for training batches
+		batches := dataLoader.GetImageBatches(epoch, dataLoader.BatchSize)
 
 		for _, batch := range batches {
 			model.GetOptimizer().ZeroGrad()
@@ -96,12 +90,16 @@ func main() {
 	totalTime := time.Since(startTime).Seconds()
 	fmt.Printf("Training completed in %.2f seconds\n", totalTime)
 
-	testBatches := testLoader.GetImageBatches(0, testLoader.BatchSize)
+	// For evaluation, we would ideally have a separate test set
+	// But for now, we'll use the same data loader to demonstrate
+	// In a real scenario, you'd want to load a separate test dataset
+	evalBatches := dataLoader.GetImageBatches(0, dataLoader.BatchSize) // Use epoch 0 for evaluation
 	correct := 0
 	totalTest := 0
-	for _, batch := range testBatches {
+	for _, batch := range evalBatches {
 		preds := model.Predict(batch.Features)
-		rows, _ := batch.Features.Dims()
+		shape := batch.Features.Shape()
+		rows := shape[0]
 		for i := 0; i < rows; i++ {
 			predictedClass := utils.GetMaxIndexRow(preds, i)
 			actualClass := utils.GetMaxIndexRow(batch.Targets, i)
@@ -132,12 +130,14 @@ func main() {
 	}
 
 	fmt.Println("Model loaded successfully! Evaluating...")
-	testBatches = testLoader.GetImageBatches(0, testLoader.BatchSize)
+	// Evaluate the loaded model
+	evalBatches = dataLoader.GetImageBatches(0, dataLoader.BatchSize) // Use epoch 0 for evaluation
 	correct = 0
 	totalTest = 0
-	for _, batch := range testBatches {
+	for _, batch := range evalBatches {
 		preds := loadedModel.Predict(batch.Features)
-		rows, _ := batch.Features.Dims()
+		shape := batch.Features.Shape()
+		rows := shape[0]
 		for i := 0; i < rows; i++ {
 			predictedClass := utils.GetMaxIndexRow(preds, i)
 			actualClass := utils.GetMaxIndexRow(batch.Targets, i)

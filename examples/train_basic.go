@@ -11,7 +11,7 @@ package main
 // 	"github.com/VigyatGoel/gotorch/network"
 // 	"github.com/VigyatGoel/gotorch/optimizer"
 // 	"github.com/VigyatGoel/gotorch/utils"
-// 	"gonum.org/v1/gonum/mat"
+// 	"gorgonia.org/tensor"
 // )
 
 // const (
@@ -37,7 +37,7 @@ package main
 
 // 	model := createModel(numFeatures)
 // 	criterion := loss.NewCrossEntropyLoss()
-// 	epochs := 10
+// 	epochs := 100
 
 // 	fmt.Println("\nTRAINING WITH ADAM")
 // 	adamOpt := optimizer.DefaultAdam(0.001)
@@ -53,6 +53,7 @@ package main
 // 	return network.NewSequential(
 // 		layer.NewLinear(inputFeatures, 1024),
 // 		layer.NewLinear(1024, 512),
+
 // 		layer.NewSiLU(),
 // 		layer.NewLinear(512, 256),
 // 		layer.NewSiLU(),
@@ -69,7 +70,7 @@ package main
 
 // func trainAndEvaluate(model *network.Sequential, criterion *loss.CrossEntropyLoss,
 // 	dataLoader *data.DataLoader,
-// 	x_train, y_train, x_test, y_test *mat.Dense, epochs int, modelPath string) {
+// 	x_train, y_train, x_test, y_test *tensor.Dense, epochs int, modelPath string) {
 
 // 	startTime := time.Now()
 
@@ -98,7 +99,8 @@ package main
 
 // 	preds := model.Predict(x_test)
 // 	correct := 0
-// 	rows, _ := x_test.Dims()
+// 	shape := x_test.Shape()
+// 	rows := shape[0]
 // 	for i := 0; i < rows; i++ {
 // 		predictedClass := utils.GetMaxIndexRow(preds, i)
 // 		actualClass := utils.GetMaxIndexRow(y_test, i)
@@ -120,7 +122,7 @@ package main
 // 	}
 // }
 
-// func loadAndUseModel(modelPath string, x_test, y_test *mat.Dense) {
+// func loadAndUseModel(modelPath string, x_test, y_test *tensor.Dense) {
 // 	fmt.Printf("\nLoading model from %s\n", modelPath)
 // 	loadedModel, err := network.Load(modelPath)
 // 	if err != nil {
@@ -132,7 +134,8 @@ package main
 
 // 	preds := loadedModel.Predict(x_test)
 // 	correct := 0
-// 	rows, _ := x_test.Dims()
+// 	shape := x_test.Shape()
+// 	rows := shape[0]
 // 	for i := 0; i < rows; i++ {
 // 		predictedClass := utils.GetMaxIndexRow(preds, i)
 // 		actualClass := utils.GetMaxIndexRow(y_test, i)

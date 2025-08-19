@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gonum.org/v1/gonum/mat"
+	"gorgonia.org/tensor"
 )
 
 type DataType int
@@ -33,8 +33,8 @@ type DataLoader struct {
 	Seed         int64
 	SplitRatio   float64
 	BatchSize    int
-	Features     *mat.Dense
-	Targets      *mat.Dense
+	Features     *tensor.Dense
+	Targets      *tensor.Dense
 	ClassNames   []string
 	ColumnNames  []string
 	ImageDir     string
@@ -44,8 +44,8 @@ type DataLoader struct {
 }
 
 type Batch struct {
-	Features *mat.Dense
-	Targets  *mat.Dense
+	Features *tensor.Dense
+	Targets  *tensor.Dense
 }
 
 func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoader {
@@ -150,7 +150,7 @@ func (dl *DataLoader) Load() error {
 			classIndex := classMap[label]
 			targetsData[i*len(dl.ClassNames)+classIndex] = 1.0
 		}
-		dl.Targets = mat.NewDense(rows, len(dl.ClassNames), targetsData)
+		dl.Targets = tensor.New(tensor.WithShape(rows, len(dl.ClassNames)), tensor.WithBacking(targetsData))
 	} else {
 		for i, record := range records {
 			val, err := strconv.ParseFloat(strings.TrimSpace(record[cols-1]), 64)
@@ -159,10 +159,10 @@ func (dl *DataLoader) Load() error {
 			}
 			targetsData[i] = val
 		}
-		dl.Targets = mat.NewDense(rows, 1, targetsData)
+		dl.Targets = tensor.New(tensor.WithShape(rows, 1), tensor.WithBacking(targetsData))
 	}
 
-	dl.Features = mat.NewDense(rows, cols-1, featuresData)
+	dl.Features = tensor.New(tensor.WithShape(rows, cols-1), tensor.WithBacking(featuresData))
 
 	if dl.Shuffle {
 		dl.shuffle()
@@ -177,18 +177,34 @@ func (dl *DataLoader) Load() error {
 
 func (dl *DataLoader) shuffle() {
 	r := rand.New(rand.NewSource(dl.Seed))
-	rows, cols := dl.Features.Dims()
-	_, targetCols := dl.Targets.Dims()
+	
+	// Get data slices
+	featureData := dl.Features.Data().([]float64)
+	targetData := dl.Targets.Data().([]float64)
+	
+	// Get shapes
+	featureShape := dl.Features.Shape()
+	targetShape := dl.Targets.Shape()
+	
+	rows := featureShape[0]
+	featureCols := featureShape[1]
+	targetCols := targetShape[1]
 
 	for i := rows - 1; i > 0; i-- {
 		j := r.Intn(i + 1)
-		for k := 0; k < cols; k++ {
-			dl.Features.Set(i, k, dl.Features.At(j, k))
-			dl.Features.Set(j, k, dl.Features.At(i, k))
+		
+		// Swap feature rows
+		for k := 0; k < featureCols; k++ {
+			idxI := i*featureCols + k
+			idxJ := j*featureCols + k
+			featureData[idxI], featureData[idxJ] = featureData[idxJ], featureData[idxI]
 		}
+		
+		// Swap target rows
 		for k := 0; k < targetCols; k++ {
-			dl.Targets.Set(i, k, dl.Targets.At(j, k))
-			dl.Targets.Set(j, k, dl.Targets.At(i, k))
+			idxI := i*targetCols + k
+			idxJ := j*targetCols + k
+			targetData[idxI], targetData[idxJ] = targetData[idxJ], targetData[idxI]
 		}
 	}
 }
@@ -201,12 +217,13 @@ func (dl *DataLoader) GetColumnNames() []string {
 	return dl.ColumnNames
 }
 
-func (dl *DataLoader) GetAll() (*mat.Dense, *mat.Dense) {
+func (dl *DataLoader) GetAll() (*tensor.Dense, *tensor.Dense) {
 	return dl.Features, dl.Targets
 }
 
-func (dl *DataLoader) GetBatches(features *mat.Dense, targets *mat.Dense, epoch int) []Batch {
-	rows, _ := features.Dims()
+func (dl *DataLoader) GetBatches(features *tensor.Dense, targets *tensor.Dense, epoch int) []Batch {
+	shape := features.Shape()
+	rows := shape[0]
 	if dl.BatchSize <= 0 {
 		return []Batch{{Features: features, Targets: targets}}
 	}
@@ -227,23 +244,43 @@ func (dl *DataLoader) GetBatches(features *mat.Dense, targets *mat.Dense, epoch 
 	numBatches := int(math.Ceil(float64(rows) / float64(dl.BatchSize)))
 	batches := make([]Batch, 0, numBatches)
 
+	// Get data slices
+	featureData := features.Data().([]float64)
+	targetData := targets.Data().([]float64)
+	
+	// Get shapes
+	featureShape := features.Shape()
+	targetShape := targets.Shape()
+	featureCols := featureShape[1]
+	targetCols := targetShape[1]
+
 	for i := 0; i < rows; i += dl.BatchSize {
 		end := i + dl.BatchSize
 		if end > rows {
 			end = rows
 		}
 
-		batchFeatures := mat.NewDense(end-i, features.RawMatrix().Cols, nil)
-		batchTargets := mat.NewDense(end-i, targets.RawMatrix().Cols, nil)
+		batchSize := end - i
+		batchFeatureData := make([]float64, batchSize*featureCols)
+		batchTargetData := make([]float64, batchSize*targetCols)
 
 		for j := i; j < end; j++ {
-			for k := 0; k < features.RawMatrix().Cols; k++ {
-				batchFeatures.Set(j-i, k, features.At(indices[j], k))
+			srcIdx := indices[j]
+			dstIdx := j - i
+			
+			// Copy feature data
+			for k := 0; k < featureCols; k++ {
+				batchFeatureData[dstIdx*featureCols+k] = featureData[srcIdx*featureCols+k]
 			}
-			for k := 0; k < targets.RawMatrix().Cols; k++ {
-				batchTargets.Set(j-i, k, targets.At(indices[j], k))
+			
+			// Copy target data
+			for k := 0; k < targetCols; k++ {
+				batchTargetData[dstIdx*targetCols+k] = targetData[srcIdx*targetCols+k]
 			}
 		}
+		
+		batchFeatures := tensor.New(tensor.WithShape(batchSize, featureCols), tensor.WithBacking(batchFeatureData))
+		batchTargets := tensor.New(tensor.WithShape(batchSize, targetCols), tensor.WithBacking(batchTargetData))
 		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
 	}
 
@@ -270,7 +307,7 @@ func (dl *DataLoader) GetImageBatches(epoch int, batchSize int) []Batch {
 		if end > total {
 			end = total
 		}
-		var features []*mat.Dense
+		var features []*tensor.Dense
 		labels := make([][]float64, 0, end-i)
 		for _, idx := range indices[i:end] {
 			sample := dl.ImageSamples[idx]
@@ -287,38 +324,45 @@ func (dl *DataLoader) GetImageBatches(epoch int, batchSize int) []Batch {
 			continue
 		}
 		rows := len(features)
-		cols := features[0].RawMatrix().Cols
+		shape := features[0].Shape()
+		cols := shape[len(shape)-1]
 		featuresData := make([]float64, 0, rows*cols)
 		for _, f := range features {
-			featuresData = append(featuresData, f.RawMatrix().Data...)
+			fData := f.Data().([]float64)
+			featuresData = append(featuresData, fData...)
 		}
 		labelsData := make([]float64, 0, len(labels)*len(dl.ClassNames))
 		for _, l := range labels {
 			labelsData = append(labelsData, l...)
 		}
-		batchFeatures := mat.NewDense(rows, cols, featuresData)
-		batchTargets := mat.NewDense(rows, len(dl.ClassNames), labelsData)
+		batchFeatures := tensor.New(tensor.WithShape(rows, cols), tensor.WithBacking(featuresData))
+		batchTargets := tensor.New(tensor.WithShape(rows, len(dl.ClassNames)), tensor.WithBacking(labelsData))
 		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
 	}
 	return batches
 }
 
 func (dl *DataLoader) NumFeatures() int {
-	rows, cols := dl.Features.Dims()
-	if rows == 0 || cols == 0 {
+	shape := dl.Features.Shape()
+	if len(shape) < 2 {
 		if len(dl.ColumnNames) > 1 {
 			return len(dl.ColumnNames) - 1
 		}
 		return 0
 	}
-	return cols
+	return shape[1]
 }
 
-func (dl *DataLoader) Split() (trainX, trainY, testX, testY *mat.Dense) {
-	rows, cols := dl.Features.Dims()
+func (dl *DataLoader) Split() (trainX, trainY, testX, testY *tensor.Dense) {
+	shape := dl.Features.Shape()
+	rows := shape[0]
 	if rows == 0 {
 		return nil, nil, nil, nil
 	}
+
+	cols := shape[1]
+	targetShape := dl.Targets.Shape()
+	targetCols := targetShape[1]
 
 	split := int(float64(rows) * dl.SplitRatio)
 	if split <= 0 {
@@ -327,53 +371,77 @@ func (dl *DataLoader) Split() (trainX, trainY, testX, testY *mat.Dense) {
 		split = rows - 1
 	}
 
-	trainX = mat.NewDense(split, cols, nil)
-	trainY = mat.NewDense(split, dl.Targets.RawMatrix().Cols, nil)
-	testX = mat.NewDense(rows-split, cols, nil)
-	testY = mat.NewDense(rows-split, dl.Targets.RawMatrix().Cols, nil)
+	// Get data slices
+	featureData := dl.Features.Data().([]float64)
+	targetData := dl.Targets.Data().([]float64)
 
+	// Create training data slices
+	trainFeatureData := make([]float64, split*cols)
+	trainTargetData := make([]float64, split*targetCols)
+
+	// Create test data slices
+	testFeatureData := make([]float64, (rows-split)*cols)
+	testTargetData := make([]float64, (rows-split)*targetCols)
+
+	// Copy data
 	for i := 0; i < split; i++ {
+		// Copy features
 		for j := 0; j < cols; j++ {
-			trainX.Set(i, j, dl.Features.At(i, j))
+			trainFeatureData[i*cols+j] = featureData[i*cols+j]
 		}
-		for j := 0; j < dl.Targets.RawMatrix().Cols; j++ {
-			trainY.Set(i, j, dl.Targets.At(i, j))
+		// Copy targets
+		for j := 0; j < targetCols; j++ {
+			trainTargetData[i*targetCols+j] = targetData[i*targetCols+j]
 		}
 	}
 
 	for i := split; i < rows; i++ {
+		// Copy features
 		for j := 0; j < cols; j++ {
-			testX.Set(i-split, j, dl.Features.At(i, j))
+			testFeatureData[(i-split)*cols+j] = featureData[i*cols+j]
 		}
-		for j := 0; j < dl.Targets.RawMatrix().Cols; j++ {
-			testY.Set(i-split, j, dl.Targets.At(i, j))
+		// Copy targets
+		for j := 0; j < targetCols; j++ {
+			testTargetData[(i-split)*targetCols+j] = targetData[i*targetCols+j]
 		}
 	}
+
+	trainX = tensor.New(tensor.WithShape(split, cols), tensor.WithBacking(trainFeatureData))
+	trainY = tensor.New(tensor.WithShape(split, targetCols), tensor.WithBacking(trainTargetData))
+	testX = tensor.New(tensor.WithShape(rows-split, cols), tensor.WithBacking(testFeatureData))
+	testY = tensor.New(tensor.WithShape(rows-split, targetCols), tensor.WithBacking(testTargetData))
 
 	return
 }
 
 func (dl *DataLoader) NormalizeFeatures() {
-	rows, cols := dl.Features.Dims()
+	shape := dl.Features.Shape()
+	rows := shape[0]
 	if rows == 0 {
 		return
 	}
+	cols := shape[1]
 
+	// Get data slice
+	featureData := dl.Features.Data().([]float64)
+
+	// Calculate means
 	means := make([]float64, cols)
-	stdDevs := make([]float64, cols)
-
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
-			means[j] += dl.Features.At(i, j)
+			means[j] += featureData[i*cols+j]
 		}
 	}
 	for j := 0; j < cols; j++ {
 		means[j] /= float64(rows)
 	}
 
+	// Calculate standard deviations
+	stdDevs := make([]float64, cols)
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
-			stdDevs[j] += math.Pow(dl.Features.At(i, j)-means[j], 2)
+			diff := featureData[i*cols+j] - means[j]
+			stdDevs[j] += diff * diff
 		}
 	}
 	for j := 0; j < cols; j++ {
@@ -383,9 +451,10 @@ func (dl *DataLoader) NormalizeFeatures() {
 		}
 	}
 
+	// Normalize features
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
-			dl.Features.Set(i, j, (dl.Features.At(i, j)-means[j])/stdDevs[j])
+			featureData[i*cols+j] = (featureData[i*cols+j] - means[j]) / stdDevs[j]
 		}
 	}
 }

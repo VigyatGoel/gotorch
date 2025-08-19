@@ -4,7 +4,7 @@ import (
 	layer "github.com/VigyatGoel/gotorch/layers"
 	"github.com/VigyatGoel/gotorch/optimizer"
 	"github.com/VigyatGoel/gotorch/persistence"
-	"gonum.org/v1/gonum/mat"
+	"gorgonia.org/tensor"
 )
 
 type Sequential struct {
@@ -34,7 +34,7 @@ func (s *Sequential) Add(layer layer.Layer) {
 	s.Layers = append(s.Layers, layer)
 }
 
-func (s *Sequential) Forward(input *mat.Dense) *mat.Dense {
+func (s *Sequential) Forward(input *tensor.Dense) *tensor.Dense {
 	output := input
 	for _, layer := range s.Layers {
 		output = layer.Forward(output)
@@ -42,7 +42,7 @@ func (s *Sequential) Forward(input *mat.Dense) *mat.Dense {
 	return output
 }
 
-func (s *Sequential) Backward(gradOutput *mat.Dense) *mat.Dense {
+func (s *Sequential) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	for i := len(s.Layers) - 1; i >= 0; i-- {
 		gradOutput = s.Layers[i].Backward(gradOutput)
 	}
@@ -68,7 +68,7 @@ func (s *Sequential) Backward(gradOutput *mat.Dense) *mat.Dense {
 	return gradOutput
 }
 
-func (s *Sequential) Predict(input *mat.Dense) *mat.Dense {
+func (s *Sequential) Predict(input *tensor.Dense) *tensor.Dense {
 	return s.Forward(input)
 }
 

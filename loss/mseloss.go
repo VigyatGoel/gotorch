@@ -1,37 +1,51 @@
 package loss
 
-import "gonum.org/v1/gonum/mat"
+import "gorgonia.org/tensor"
 
 type MSELoss struct {
-	Predictions *mat.Dense
-	Targets     *mat.Dense
+	Predictions *tensor.Dense
+	Targets     *tensor.Dense
 }
 
 func NewMSELoss() *MSELoss {
 	return &MSELoss{}
 }
 
-func (l *MSELoss) Forward(predictions, targets *mat.Dense) float64 {
+func (l *MSELoss) Forward(predictions, targets *tensor.Dense) float64 {
 	l.Predictions = predictions
 	l.Targets = targets
+	
+	// Calculate MSE: mean((predictions - targets)^2)
+	predData := predictions.Data().([]float64)
+	targetData := targets.Data().([]float64)
+	
 	sum := 0.0
-	rows, cols := predictions.Dims()
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			diff := predictions.At(i, j) - targets.At(i, j)
-			sum += diff * diff
-		}
+	for i := range predData {
+		diff := predData[i] - targetData[i]
+		sum += diff * diff
 	}
+	
+	shape := predictions.Shape()
+	rows := shape[0]
 	return sum / float64(rows)
 }
 
-func (l *MSELoss) Backward() *mat.Dense {
-	rows, cols := l.Predictions.Dims()
-	grad := mat.NewDense(rows, cols, nil)
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			grad.Set(i, j, 2*(l.Predictions.At(i, j)-l.Targets.At(i, j))/float64(rows))
-		}
+func (l *MSELoss) Backward() *tensor.Dense {
+	// Gradient of MSE: 2 * (predictions - targets) / rows
+	predData := l.Predictions.Data().([]float64)
+	targetData := l.Targets.Data().([]float64)
+	
+	gradData := make([]float64, len(predData))
+	for i := range predData {
+		gradData[i] = 2 * (predData[i] - targetData[i])
 	}
+	
+	shape := l.Predictions.Shape()
+	rows := shape[0]
+	for i := range gradData {
+		gradData[i] /= float64(rows)
+	}
+	
+	grad := tensor.New(tensor.WithShape(shape...), tensor.WithBacking(gradData))
 	return grad
 }

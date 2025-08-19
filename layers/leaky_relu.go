@@ -1,44 +1,53 @@
 package layer
 
 import (
-	"github.com/VigyatGoel/gotorch/utils"
-	"gonum.org/v1/gonum/mat"
+	"gorgonia.org/tensor"
 )
 
 type LeakyReLU struct {
-	input *mat.Dense
-	Alpha float64
+	Alpha  float64
+	input  *tensor.Dense
+	output *tensor.Dense
 }
 
 func NewLeakyReLU(alpha float64) *LeakyReLU {
-	return &LeakyReLU{Alpha: alpha}
-}
-
-func (r *LeakyReLU) Forward(x *mat.Dense) *mat.Dense {
-	r.input = x
-	if r.Alpha == 0 {
-		r.Alpha = 0.01
+	return &LeakyReLU{
+		Alpha: alpha,
 	}
-	return utils.ApplyFuncDense(x, func(v float64) float64 {
-		return utils.LeakyReLU(v, r.Alpha)
-	})
 }
 
-func (r *LeakyReLU) Backward(gradOutput *mat.Dense) *mat.Dense {
-	rows, cols := r.input.Dims()
-	grad := mat.NewDense(rows, cols, nil)
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			deriv := utils.LeakyReLUDerivative(r.input.At(i, j), r.Alpha)
-			grad.Set(i, j, gradOutput.At(i, j)*deriv)
+func (l *LeakyReLU) Forward(x *tensor.Dense) *tensor.Dense {
+	l.input = x
+	l.output = x.Clone().(*tensor.Dense)
+	data := l.output.Data().([]float64)
+	for i, v := range data {
+		if v < 0 {
+			data[i] = v * l.Alpha
 		}
 	}
-	return grad
+	return l.output
 }
 
-func (r *LeakyReLU) GetWeights() *mat.Dense                 { return nil }
-func (r *LeakyReLU) GetGradients() *mat.Dense               { return nil }
-func (r *LeakyReLU) UpdateWeights(weightsUpdate *mat.Dense) {}
-func (r *LeakyReLU) GetBiases() *mat.Dense                  { return nil }
-func (r *LeakyReLU) GetBiasGradients() *mat.Dense           { return nil }
-func (r *LeakyReLU) UpdateBiases(biasUpdate *mat.Dense)     {}
+func (l *LeakyReLU) Backward(gradOutput *tensor.Dense) *tensor.Dense {
+	// Gradient of LeakyReLU: 1 if x > 0, alpha otherwise
+	grad := l.input.Clone().(*tensor.Dense)
+	inputData := grad.Data().([]float64)
+	for i, v := range inputData {
+		if v > 0 {
+			inputData[i] = 1.0
+		} else {
+			inputData[i] = l.Alpha
+		}
+	}
+	
+	// Element-wise multiplication with gradOutput
+	result, _ := tensor.Mul(grad, gradOutput)
+	return result.(*tensor.Dense)
+}
+
+func (l *LeakyReLU) GetWeights() *tensor.Dense                    { return nil }
+func (l *LeakyReLU) GetGradients() *tensor.Dense                  { return nil }
+func (l *LeakyReLU) UpdateWeights(weightsUpdate *tensor.Dense)    {}
+func (l *LeakyReLU) GetBiases() *tensor.Dense                     { return nil }
+func (l *LeakyReLU) GetBiasGradients() *tensor.Dense              { return nil }
+func (l *LeakyReLU) UpdateBiases(biasUpdate *tensor.Dense)        {}
