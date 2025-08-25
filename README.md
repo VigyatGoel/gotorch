@@ -66,7 +66,7 @@ GoTorch includes a CLI tool that simplifies running your models by automatically
 
 To build the CLI tool:
 ```bash
-go build -o gotorch ./cmd/gotorch
+go build -o gotorch github.com/VigyatGoel/gotorch/cmd/gotorch
 ```
 
 To run a Go program that uses GoTorch:
@@ -88,7 +88,7 @@ ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25 go run your_program.go arg1 arg2
 
 ```bash
 # Build the CLI tool
-go build -o gotorch ./cmd/gotorch
+go build -o gotorch github.com/VigyatGoel/gotorch/cmd/gotorch
 
 # Run the example
 ./gotorch run examples/train_basic.go
