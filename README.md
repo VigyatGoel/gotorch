@@ -1,6 +1,6 @@
 # GoTorch
 
-[![Go Version](https://img.shields.io/badge/Go-1.24-blue.svg)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.25-blue.svg)](https://go.dev/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/VigyatGoel/gotorch.svg)](https://pkg.go.dev/github.com/VigyatGoel/gotorch)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
