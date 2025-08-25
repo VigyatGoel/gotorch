@@ -36,15 +36,15 @@ func (r *ReLU) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 			inputData[i] = 0.0
 		}
 	}
-	
+
 	// Element-wise multiplication with gradOutput
 	result, _ := tensor.Mul(grad, gradOutput)
 	return result.(*tensor.Dense)
 }
 
-func (r *ReLU) GetWeights() *tensor.Dense                    { return nil }
-func (r *ReLU) GetGradients() *tensor.Dense                  { return nil }
-func (r *ReLU) UpdateWeights(weightsUpdate *tensor.Dense)    {}
-func (r *ReLU) GetBiases() *tensor.Dense                     { return nil }
-func (r *ReLU) GetBiasGradients() *tensor.Dense              { return nil }
-func (r *ReLU) UpdateBiases(biasUpdate *tensor.Dense)        {}
+func (r *ReLU) GetWeights() *tensor.Dense                 { return nil }
+func (r *ReLU) GetGradients() *tensor.Dense               { return nil }
+func (r *ReLU) UpdateWeights(weightsUpdate *tensor.Dense) {}
+func (r *ReLU) GetBiases() *tensor.Dense                  { return nil }
+func (r *ReLU) GetBiasGradients() *tensor.Dense           { return nil }
+func (r *ReLU) UpdateBiases(biasUpdate *tensor.Dense)     {}

@@ -27,20 +27,23 @@ type ImageSample struct {
 }
 
 type DataLoader struct {
-	FilePath     string
-	DataType     DataType
-	Shuffle      bool
-	Seed         int64
-	SplitRatio   float64
-	BatchSize    int
-	Features     *tensor.Dense
-	Targets      *tensor.Dense
-	ClassNames   []string
-	ColumnNames  []string
-	ImageDir     string
-	ImageSamples []ImageSample
-	ImageWidth   int
-	ImageHeight  int
+	FilePath          string
+	DataType          DataType
+	Shuffle           bool
+	Seed              int64
+	SplitRatio        float64
+	BatchSize         int
+	Features          *tensor.Dense
+	Targets           *tensor.Dense
+	ClassNames        []string
+	ColumnNames       []string
+	ImageDir          string
+	ImageSamples      []ImageSample
+	ImageWidth        int
+	ImageHeight       int
+	Grayscale         bool
+	trainImageSamples []ImageSample
+	testImageSamples  []ImageSample
 }
 
 type Batch struct {
@@ -57,6 +60,7 @@ func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoade
 		SplitRatio: 0.8,
 		BatchSize:  batchSize,
 		ClassNames: []string{},
+		Grayscale:  true, // Default to grayscale
 	}
 }
 
@@ -86,6 +90,13 @@ func (dl *DataLoader) Load() error {
 		if dl.SplitRatio <= 0 || dl.SplitRatio >= 1 {
 			dl.SplitRatio = 0.8
 		}
+
+		// Split the samples
+		total := len(dl.ImageSamples)
+		splitIndex := int(float64(total) * dl.SplitRatio)
+		dl.trainImageSamples = dl.ImageSamples[:splitIndex]
+		dl.testImageSamples = dl.ImageSamples[splitIndex:]
+
 		return nil
 	}
 
@@ -177,29 +188,29 @@ func (dl *DataLoader) Load() error {
 
 func (dl *DataLoader) shuffle() {
 	r := rand.New(rand.NewSource(dl.Seed))
-	
+
 	// Get data slices
 	featureData := dl.Features.Data().([]float64)
 	targetData := dl.Targets.Data().([]float64)
-	
+
 	// Get shapes
 	featureShape := dl.Features.Shape()
 	targetShape := dl.Targets.Shape()
-	
+
 	rows := featureShape[0]
 	featureCols := featureShape[1]
 	targetCols := targetShape[1]
 
 	for i := rows - 1; i > 0; i-- {
 		j := r.Intn(i + 1)
-		
+
 		// Swap feature rows
 		for k := 0; k < featureCols; k++ {
 			idxI := i*featureCols + k
 			idxJ := j*featureCols + k
 			featureData[idxI], featureData[idxJ] = featureData[idxJ], featureData[idxI]
 		}
-		
+
 		// Swap target rows
 		for k := 0; k < targetCols; k++ {
 			idxI := i*targetCols + k
@@ -247,7 +258,7 @@ func (dl *DataLoader) GetBatches(features *tensor.Dense, targets *tensor.Dense, 
 	// Get data slices
 	featureData := features.Data().([]float64)
 	targetData := targets.Data().([]float64)
-	
+
 	// Get shapes
 	featureShape := features.Shape()
 	targetShape := targets.Shape()
@@ -267,18 +278,18 @@ func (dl *DataLoader) GetBatches(features *tensor.Dense, targets *tensor.Dense, 
 		for j := i; j < end; j++ {
 			srcIdx := indices[j]
 			dstIdx := j - i
-			
+
 			// Copy feature data
 			for k := 0; k < featureCols; k++ {
 				batchFeatureData[dstIdx*featureCols+k] = featureData[srcIdx*featureCols+k]
 			}
-			
+
 			// Copy target data
 			for k := 0; k < targetCols; k++ {
 				batchTargetData[dstIdx*targetCols+k] = targetData[srcIdx*targetCols+k]
 			}
 		}
-		
+
 		batchFeatures := tensor.New(tensor.WithShape(batchSize, featureCols), tensor.WithBacking(batchFeatureData))
 		batchTargets := tensor.New(tensor.WithShape(batchSize, targetCols), tensor.WithBacking(batchTargetData))
 		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
@@ -287,8 +298,16 @@ func (dl *DataLoader) GetBatches(features *tensor.Dense, targets *tensor.Dense, 
 	return batches
 }
 
-func (dl *DataLoader) GetImageBatches(epoch int, batchSize int) []Batch {
-	total := len(dl.ImageSamples)
+func (dl *DataLoader) GetTrainImageBatches(epoch int, batchSize int) []Batch {
+	return dl.getImageBatches(dl.trainImageSamples, epoch, batchSize)
+}
+
+func (dl *DataLoader) GetTestImageBatches(batchSize int) []Batch {
+	return dl.getImageBatches(dl.testImageSamples, 0, batchSize)
+}
+
+func (dl *DataLoader) getImageBatches(samples []ImageSample, epoch int, batchSize int) []Batch {
+	total := len(samples)
 	indices := make([]int, total)
 	for i := 0; i < total; i++ {
 		indices[i] = i
@@ -310,8 +329,14 @@ func (dl *DataLoader) GetImageBatches(epoch int, batchSize int) []Batch {
 		var features []*tensor.Dense
 		labels := make([][]float64, 0, end-i)
 		for _, idx := range indices[i:end] {
-			sample := dl.ImageSamples[idx]
-			imgMat, err := LoadImageGrayscale(sample.Path, dl.ImageWidth, dl.ImageHeight)
+			sample := samples[idx]
+			var imgMat *tensor.Dense
+			var err error
+			if dl.Grayscale {
+				imgMat, err = LoadImageGrayscale(sample.Path, dl.ImageWidth, dl.ImageHeight)
+			} else {
+				imgMat, err = LoadImageRGB(sample.Path, dl.ImageWidth, dl.ImageHeight)
+			}
 			if err != nil {
 				continue
 			}
@@ -323,20 +348,29 @@ func (dl *DataLoader) GetImageBatches(epoch int, batchSize int) []Batch {
 		if len(features) == 0 {
 			continue
 		}
-		rows := len(features)
-		shape := features[0].Shape()
-		cols := shape[len(shape)-1]
-		featuresData := make([]float64, 0, rows*cols)
+
+		imgShape := features[0].Shape()
+		channels := imgShape[1]
+		height := imgShape[2]
+		width := imgShape[3]
+		currentBatchSize := len(features)
+
+		featuresData := make([]float64, 0, currentBatchSize*channels*height*width)
 		for _, f := range features {
-			fData := f.Data().([]float64)
-			featuresData = append(featuresData, fData...)
+			featuresData = append(featuresData, f.Data().([]float64)...)
 		}
+
+		batchFeatures := tensor.New(
+			tensor.WithShape(currentBatchSize, channels, height, width),
+			tensor.WithBacking(featuresData),
+		)
+
 		labelsData := make([]float64, 0, len(labels)*len(dl.ClassNames))
 		for _, l := range labels {
 			labelsData = append(labelsData, l...)
 		}
-		batchFeatures := tensor.New(tensor.WithShape(rows, cols), tensor.WithBacking(featuresData))
-		batchTargets := tensor.New(tensor.WithShape(rows, len(dl.ClassNames)), tensor.WithBacking(labelsData))
+		batchTargets := tensor.New(tensor.WithShape(len(labels), len(dl.ClassNames)), tensor.WithBacking(labelsData))
+
 		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
 	}
 	return batches

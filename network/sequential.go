@@ -1,7 +1,7 @@
 package network
 
 import (
-	layer "github.com/VigyatGoel/gotorch/layers"
+	"github.com/VigyatGoel/gotorch/layer"
 	"github.com/VigyatGoel/gotorch/optimizer"
 	"github.com/VigyatGoel/gotorch/persistence"
 	"gorgonia.org/tensor"

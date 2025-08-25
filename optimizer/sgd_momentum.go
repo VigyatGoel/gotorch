@@ -6,6 +6,18 @@ import (
 	"gorgonia.org/tensor"
 )
 
+// SGDMomentum implements the Stochastic Gradient Descent optimizer with Momentum.
+// It follows the standard PyTorch formulation:
+//   v_t = momentum * v_{t-1} + gradient
+//   parameter = parameter - learning_rate * v_t
+//
+// where v_t is the velocity at time step t, momentum is the momentum coefficient,
+// gradient is the gradient of the loss with respect to the parameter,
+// and learning_rate is the learning rate.
+//
+// This implementation uses the default PyTorch parameters:
+// - dampening = 0 (no dampening)
+// - nesterov = false (standard momentum, not Nesterov momentum)
 type SGDMomentum struct {
 	LR       float64
 	Momentum float64
@@ -13,6 +25,8 @@ type SGDMomentum struct {
 	vb       map[string]*tensor.Dense
 }
 
+// NewSGDMomentum creates a new SGDMomentum optimizer with the specified learning rate and momentum.
+// The momentum parameter should typically be between 0 and 1, with common values like 0.9 or 0.99.
 func NewSGDMomentum(lr float64, momentum float64) *SGDMomentum {
 	return &SGDMomentum{
 		LR:       lr,
@@ -22,11 +36,18 @@ func NewSGDMomentum(lr float64, momentum float64) *SGDMomentum {
 	}
 }
 
+// DefaultSGDMomentum creates a new SGDMomentum optimizer with the specified learning rate
+// and default momentum value of 0.9.
 func DefaultSGDMomentum(lr float64) *SGDMomentum {
 	return NewSGDMomentum(lr, 0.9)
 }
 
 func (sgd *SGDMomentum) Step(weights *tensor.Dense, gradients *tensor.Dense) *tensor.Dense {
+	// Handle nil inputs
+	if weights == nil || gradients == nil {
+		return weights
+	}
+	
 	shape := weights.Shape()
 	if len(shape) == 0 {
 		fmt.Println("SGD optimizer skipping update - empty weights or gradients")
@@ -71,8 +92,10 @@ func (sgd *SGDMomentum) Step(weights *tensor.Dense, gradients *tensor.Dense) *te
 	copy(updatedVData, vData)
 
 	for i := range updatedWeightData {
-		updatedVData[i] = sgd.Momentum*updatedVData[i] - sgd.LR*gradData[i]
-		updatedWeightData[i] += updatedVData[i]
+		// Standard momentum update: v = momentum * v + gradient
+		updatedVData[i] = sgd.Momentum*updatedVData[i] + gradData[i]
+		// Parameter update: weight = weight - lr * v
+		updatedWeightData[i] = updatedWeightData[i] - sgd.LR*updatedVData[i]
 	}
 
 	// Update the velocity tensor with the new values
@@ -83,6 +106,7 @@ func (sgd *SGDMomentum) Step(weights *tensor.Dense, gradients *tensor.Dense) *te
 }
 
 func (sgd *SGDMomentum) StepBias(biases *tensor.Dense, biasGradients *tensor.Dense) *tensor.Dense {
+	// Handle nil inputs
 	if biases == nil || biasGradients == nil {
 		return biases
 	}
@@ -130,8 +154,10 @@ func (sgd *SGDMomentum) StepBias(biases *tensor.Dense, biasGradients *tensor.Den
 	copy(updatedVBData, vbData)
 
 	for i := range updatedBiasData {
-		updatedVBData[i] = sgd.Momentum*updatedVBData[i] - sgd.LR*biasGradData[i]
-		updatedBiasData[i] += updatedVBData[i]
+		// Standard momentum update: v = momentum * v + gradient
+		updatedVBData[i] = sgd.Momentum*updatedVBData[i] + biasGradData[i]
+		// Parameter update: bias = bias - lr * v
+		updatedBiasData[i] = updatedBiasData[i] - sgd.LR*updatedVBData[i]
 	}
 
 	// Update the velocity tensor with the new values

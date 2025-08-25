@@ -6,10 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-
 	"strings"
 
-	layer "github.com/VigyatGoel/gotorch/layers"
+	"github.com/VigyatGoel/gotorch/layer"
 	"github.com/VigyatGoel/gotorch/optimizer"
 	"gorgonia.org/tensor"
 )
@@ -28,7 +27,6 @@ func serializableToTensorDense(data []float64, shape []int) *tensor.Dense {
 	if data == nil || len(shape) == 0 {
 		return nil
 	}
-	// Create a copy of the data to avoid sharing memory
 	dataCopy := make([]float64, len(data))
 	copy(dataCopy, data)
 	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(dataCopy))
@@ -48,6 +46,13 @@ type LayerConfig struct {
 	Biases      []float64 `json:"biases,omitempty"`
 	BiasShape   []int     `json:"bias_shape,omitempty"`
 	Alpha       float64   `json:"alpha,omitempty"`
+	// For Conv2D
+	InChannels  int `json:"in_channels,omitempty"`
+	OutChannels int `json:"out_channels,omitempty"`
+	// For Conv2D and MaxPool2D
+	KernelSize int `json:"kernel_size,omitempty"`
+	Stride     int `json:"stride,omitempty"`
+	Padding    int `json:"padding,omitempty"`
 }
 
 type OptimizerConfig struct {
@@ -65,9 +70,7 @@ type ModelConfig struct {
 }
 
 func SaveModel(model ModelInterface, filePath string) error {
-
 	ext := filepath.Ext(filePath)
-
 	if ext == "" {
 		filePath = strings.TrimSuffix(filePath, ext) + ".gth"
 	} else if ext != ".gth" {
@@ -89,11 +92,10 @@ func SaveModel(model ModelInterface, filePath string) error {
 			Type: layerType,
 		}
 
-		switch layerType {
-		case "Linear":
-			linear, _ := l.(*layer.Linear)
-			wData, wShape := tensorDenseToSerializable(linear.GetWeights())
-			bData, bShape := tensorDenseToSerializable(linear.GetBiases())
+		switch typedLayer := l.(type) {
+		case *layer.Linear:
+			wData, wShape := tensorDenseToSerializable(typedLayer.GetWeights())
+			bData, bShape := tensorDenseToSerializable(typedLayer.GetBiases())
 			if len(wShape) == 2 {
 				layerConfig.InFeatures = wShape[0]
 				layerConfig.OutFeatures = wShape[1]
@@ -102,12 +104,25 @@ func SaveModel(model ModelInterface, filePath string) error {
 			layerConfig.WeightShape = wShape
 			layerConfig.Biases = bData
 			layerConfig.BiasShape = bShape
-
-		case "LeakyReLU":
-			leaky, _ := l.(*layer.LeakyReLU)
-			layerConfig.Alpha = leaky.Alpha
-
-		case "ReLU", "Sigmoid", "Softmax", "SiLU":
+		case *layer.Conv2D:
+			wData, wShape := tensorDenseToSerializable(typedLayer.GetWeights())
+			bData, bShape := tensorDenseToSerializable(typedLayer.GetBiases())
+			layerConfig.InChannels = typedLayer.InChannels
+			layerConfig.OutChannels = typedLayer.OutChannels
+			layerConfig.KernelSize = typedLayer.KernelSize
+			layerConfig.Stride = typedLayer.Stride
+			layerConfig.Padding = typedLayer.Padding
+			layerConfig.Weights = wData
+			layerConfig.WeightShape = wShape
+			layerConfig.Biases = bData
+			layerConfig.BiasShape = bShape
+		case *layer.MaxPool2D:
+			layerConfig.KernelSize = typedLayer.PoolSize
+			layerConfig.Stride = typedLayer.Stride
+		case *layer.LeakyReLU:
+			layerConfig.Alpha = typedLayer.Alpha
+		case *layer.ReLU, *layer.Sigmoid, *layer.Softmax, *layer.SiLU, *layer.Flatten:
+			// No parameters to save
 		}
 
 		modelConfig.Layers[i] = layerConfig
@@ -171,23 +186,29 @@ func LoadModelData(filePath string) (*ModelData, error) {
 				linear.UpdateBiases(serializableToTensorDense(layerConfig.Biases, layerConfig.BiasShape))
 			}
 			newLayer = linear
-
+		case "Conv2D":
+			conv := layer.NewConv2D(layerConfig.InChannels, layerConfig.OutChannels, layerConfig.KernelSize, layerConfig.Stride, layerConfig.Padding)
+			if layerConfig.Weights != nil && len(layerConfig.WeightShape) > 0 {
+				conv.UpdateWeights(serializableToTensorDense(layerConfig.Weights, layerConfig.WeightShape))
+			}
+			if layerConfig.Biases != nil && len(layerConfig.BiasShape) > 0 {
+				conv.UpdateBiases(serializableToTensorDense(layerConfig.Biases, layerConfig.BiasShape))
+			}
+			newLayer = conv
+		case "MaxPool2D":
+			newLayer = layer.NewMaxPool2D(layerConfig.KernelSize, layerConfig.Stride)
+		case "Flatten":
+			newLayer = layer.NewFlatten()
 		case "LeakyReLU":
-			leaky := layer.NewLeakyReLU(layerConfig.Alpha)
-			newLayer = leaky
-
+			newLayer = layer.NewLeakyReLU(layerConfig.Alpha)
 		case "ReLU":
 			newLayer = layer.NewReLU()
-
 		case "Sigmoid":
 			newLayer = layer.NewSigmoid()
-
 		case "Softmax":
 			newLayer = layer.NewSoftmax()
-
 		case "SiLU":
 			newLayer = layer.NewSiLU()
-
 		default:
 			return nil, fmt.Errorf("unsupported layer type: %s", layerConfig.Type)
 		}

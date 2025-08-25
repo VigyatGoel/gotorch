@@ -111,11 +111,11 @@ func SiLUDerivative(x float64) float64 {
 
 func Softmax(logits *tensor.Dense) *tensor.Dense {
 	result := logits.Clone().(*tensor.Dense)
-	
+
 	// Get data slice
 	data := result.Data().([]float64)
 	shape := result.Shape()
-	
+
 	// For 2D tensor, apply softmax along the last dimension (columns)
 	if len(shape) == 2 {
 		rows, cols := shape[0], shape[1]
@@ -127,14 +127,14 @@ func Softmax(logits *tensor.Dense) *tensor.Dense {
 					maxVal = data[i*cols+j]
 				}
 			}
-			
+
 			// Calculate sum of exponentials
 			sum := 0.0
 			for j := 0; j < cols; j++ {
 				data[i*cols+j] = math.Exp(data[i*cols+j] - maxVal)
 				sum += data[i*cols+j]
 			}
-			
+
 			// Normalize
 			for j := 0; j < cols; j++ {
 				data[i*cols+j] /= sum
@@ -148,18 +148,18 @@ func Softmax(logits *tensor.Dense) *tensor.Dense {
 				maxVal = data[i]
 			}
 		}
-		
+
 		sum := 0.0
 		for i := 0; i < len(data); i++ {
 			data[i] = math.Exp(data[i] - maxVal)
 			sum += data[i]
 		}
-		
+
 		for i := 0; i < len(data); i++ {
 			data[i] /= sum
 		}
 	}
-	
+
 	return result
 }
 
@@ -170,15 +170,15 @@ func SoftmaxDense(logits *tensor.Dense) *tensor.Dense {
 func GetMaxIndexRow(m *tensor.Dense, row int) int {
 	shape := m.Shape()
 	cols := shape[len(shape)-1]
-	
+
 	data := m.Data().([]float64)
-	
+
 	// Calculate the starting index for this row
 	startIdx := row * cols
-	
+
 	maxIdx := 0
 	maxVal := data[startIdx]
-	
+
 	for j := 1; j < cols; j++ {
 		val := data[startIdx+j]
 

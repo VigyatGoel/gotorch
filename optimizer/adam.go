@@ -7,6 +7,23 @@ import (
 	"gorgonia.org/tensor"
 )
 
+// Adam implements the Adam optimizer, which is an adaptive learning rate optimization algorithm
+// that's been designed specifically for training deep neural networks.
+//
+// It follows the standard PyTorch formulation:
+//   m_t = beta1 * m_{t-1} + (1 - beta1) * gradient
+//   v_t = beta2 * v_{t-1} + (1 - beta2) * gradient^2
+//   m_hat = m_t / (1 - beta1^t)
+//   v_hat = v_t / (1 - beta2^t)
+//   parameter = parameter - learning_rate * m_hat / (sqrt(v_hat) + epsilon)
+//
+// where:
+//   m_t and v_t are the first and second moment vectors
+//   beta1 and beta2 are the exponential decay rates for the moment estimates
+//   gradient is the gradient of the loss with respect to the parameter
+//   learning_rate is the learning rate
+//   epsilon is a small constant for numerical stability
+//   t is the time step
 type Adam struct {
 	LR      float64
 	Beta1   float64
@@ -19,6 +36,12 @@ type Adam struct {
 	vb      map[string]*tensor.Dense
 }
 
+// NewAdam creates a new Adam optimizer with the specified parameters.
+// Common values are:
+//   - lr: 0.001 (learning rate)
+//   - beta1: 0.9 (exponential decay rate for the first moment estimates)
+//   - beta2: 0.999 (exponential decay rate for the second moment estimates)
+//   - epsilon: 1e-8 (small constant for numerical stability)
 func NewAdam(lr float64, beta1, beta2, epsilon float64) *Adam {
 	return &Adam{
 		LR:      lr,
@@ -33,6 +56,8 @@ func NewAdam(lr float64, beta1, beta2, epsilon float64) *Adam {
 	}
 }
 
+// DefaultAdam creates a new Adam optimizer with the specified learning rate
+// and default parameters (beta1=0.9, beta2=0.999, epsilon=1e-8).
 func DefaultAdam(lr float64) *Adam {
 	return NewAdam(lr, 0.9, 0.999, 1e-8)
 }
@@ -58,18 +83,18 @@ func (a *Adam) Step(weights *tensor.Dense, gradients *tensor.Dense) *tensor.Dens
 	v := a.v[key]
 	beta1_t := math.Pow(a.Beta1, float64(a.T))
 	beta2_t := math.Pow(a.Beta2, float64(a.T))
-	
+
 	// Create copies of the data to avoid modifying the original tensors
 	weightData := make([]float64, len(weights.Data().([]float64)))
 	copy(weightData, weights.Data().([]float64))
 	gradData := gradients.Data().([]float64)
-	
+
 	// Create copies of momentum and velocity data to avoid modifying them in place
 	mData := make([]float64, len(m.Data().([]float64)))
 	copy(mData, m.Data().([]float64))
 	vData := make([]float64, len(v.Data().([]float64)))
 	copy(vData, v.Data().([]float64))
-	
+
 	for i := range weightData {
 		g := gradData[i]
 		mData[i] = a.Beta1*mData[i] + (1-a.Beta1)*g
@@ -78,11 +103,11 @@ func (a *Adam) Step(weights *tensor.Dense, gradients *tensor.Dense) *tensor.Dens
 		vHat := vData[i] / (1 - beta2_t)
 		weightData[i] = weightData[i] - a.LR*mHat/(math.Sqrt(vHat)+a.Epsilon)
 	}
-	
+
 	// Update the momentum and velocity tensors with the new values
 	copy(m.Data().([]float64), mData)
 	copy(v.Data().([]float64), vData)
-	
+
 	// Return a new tensor with updated weights
 	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(weightData))
 }
@@ -107,18 +132,18 @@ func (a *Adam) StepBias(biases *tensor.Dense, biasGradients *tensor.Dense) *tens
 	vb := a.vb[key]
 	beta1_t := math.Pow(a.Beta1, float64(a.T))
 	beta2_t := math.Pow(a.Beta2, float64(a.T))
-	
+
 	// Create copies of the data to avoid modifying the original tensors
 	biasData := make([]float64, len(biases.Data().([]float64)))
 	copy(biasData, biases.Data().([]float64))
 	biasGradData := biasGradients.Data().([]float64)
-	
+
 	// Create copies of momentum and velocity data to avoid modifying them in place
 	mbData := make([]float64, len(mb.Data().([]float64)))
 	copy(mbData, mb.Data().([]float64))
 	vbData := make([]float64, len(vb.Data().([]float64)))
 	copy(vbData, vb.Data().([]float64))
-	
+
 	for i := range biasData {
 		g := biasGradData[i]
 		mbData[i] = a.Beta1*mbData[i] + (1-a.Beta1)*g
@@ -127,11 +152,11 @@ func (a *Adam) StepBias(biases *tensor.Dense, biasGradients *tensor.Dense) *tens
 		vHat := vbData[i] / (1 - beta2_t)
 		biasData[i] = biasData[i] - a.LR*mHat/(math.Sqrt(vHat)+a.Epsilon)
 	}
-	
+
 	// Update the momentum and velocity tensors with the new values
 	copy(mb.Data().([]float64), mbData)
 	copy(vb.Data().([]float64), vbData)
-	
+
 	// Return a new tensor with updated biases
 	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(biasData))
 }

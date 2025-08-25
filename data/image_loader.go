@@ -1,6 +1,7 @@
 package data
 
 import (
+	"fmt"
 	"image"
 	"image/draw"
 	"image/jpeg"
@@ -13,7 +14,9 @@ import (
 	"gorgonia.org/tensor"
 )
 
-func LoadImage(path string, width, height int) (*tensor.Dense, error) {
+// LoadImageAs4D loads an image and returns it as a 4D tensor [1, channels, height, width]
+// This is the format needed for CNN models
+func LoadImageAs4D(path string, width, height int, grayscale bool) (*tensor.Dense, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -28,87 +31,70 @@ func LoadImage(path string, width, height int) (*tensor.Dense, error) {
 	case ".png":
 		img, err = png.Decode(file)
 	default:
-		return nil, err
+		return nil, fmt.Errorf("unsupported image format: %s", ext)
 	}
 	if err != nil {
 		return nil, err
 	}
-
-	grayImg := image.NewGray(img.Bounds())
-	draw.Draw(grayImg, img.Bounds(), img, image.Point{}, draw.Src)
-
-	resized := resize.Resize(uint(width), uint(height), grayImg, resize.Lanczos3)
-	resizedGray, ok := resized.(*image.Gray)
-	if !ok {
-		b := resized.Bounds()
-		gray := image.NewGray(b)
-		draw.Draw(gray, b, resized, b.Min, draw.Src)
-		resizedGray = gray
-	}
-
-	pixels := make([]float64, width*height)
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			c := resizedGray.GrayAt(x, y)
-			pixels[y*width+x] = float64(c.Y) / 255.0
-		}
-	}
-	return tensor.New(tensor.WithShape(1, width*height), tensor.WithBacking(pixels)), nil
-}
-
-// LoadImageGrayscale loads an image as grayscale and returns it as a flattened vector
-// This function is specifically designed for loading single grayscale images for neural networks
-func LoadImageGrayscale(path string, width, height int) (*tensor.Dense, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var img image.Image
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".jpg", ".jpeg":
-		img, err = jpeg.Decode(file)
-	case ".png":
-		img, err = png.Decode(file)
-	default:
-		return nil, err
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert to grayscale
-	grayImg := image.NewGray(img.Bounds())
-	draw.Draw(grayImg, img.Bounds(), img, image.Point{}, draw.Src)
 
 	// Resize the image
-	resized := resize.Resize(uint(width), uint(height), grayImg, resize.Lanczos3)
-	resizedGray, ok := resized.(*image.Gray)
-	if !ok {
-		b := resized.Bounds()
-		gray := image.NewGray(b)
-		draw.Draw(gray, b, resized, b.Min, draw.Src)
-		resizedGray = gray
-	}
+	resized := resize.Resize(uint(width), uint(height), img, resize.Lanczos3)
 
-	// Convert to normalized float64 values
-	pixels := make([]float64, width*height)
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			c := resizedGray.GrayAt(x, y)
-			pixels[y*width+x] = float64(c.Y) / 255.0
+	var pixels []float64
+	var channels int
+
+	if grayscale {
+		// Convert to grayscale
+		channels = 1
+		grayImg := image.NewGray(resized.Bounds())
+		draw.Draw(grayImg, resized.Bounds(), resized, image.Point{}, draw.Src)
+
+		pixels = make([]float64, channels*width*height)
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				c := grayImg.GrayAt(x, y)
+				// Store in CHW format (channels, height, width)
+				pixels[y*width+x] = float64(c.Y) / 255.0
+			}
+		}
+	} else {
+		// RGB image
+		channels = 3
+		pixels = make([]float64, channels*width*height)
+
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				r, g, b, _ := resized.At(x, y).RGBA()
+				// Store in CHW format (channels, height, width)
+				pixels[0*height*width+y*width+x] = float64(r) / 65535.0
+				pixels[1*height*width+y*width+x] = float64(g) / 65535.0
+				pixels[2*height*width+y*width+x] = float64(b) / 65535.0
+			}
 		}
 	}
-	return tensor.New(tensor.WithShape(1, width*height), tensor.WithBacking(pixels)), nil
+
+	// Return as 4D tensor [1, channels, height, width]
+	return tensor.New(
+		tensor.WithShape(1, channels, height, width),
+		tensor.WithBacking(pixels),
+	), nil
 }
 
-// LoadImageRGB loads an image as a 3D tensor (channels, height, width) and flattens it for tensor.Dense
-func LoadImageRGB(path string, width, height int) (*tensor.Dense, [3]int, error) {
+// LoadImageGrayscale loads a grayscale image as 4D tensor [1, 1, height, width]
+func LoadImageGrayscale(path string, width, height int) (*tensor.Dense, error) {
+	return LoadImageAs4D(path, width, height, true)
+}
+
+// LoadImageRGB loads an RGB image as 4D tensor [1, 3, height, width]
+func LoadImageRGB(path string, width, height int) (*tensor.Dense, error) {
+	return LoadImageAs4D(path, width, height, false)
+}
+
+// LoadImageFlattened loads and flattens an image (for non-CNN models)
+func LoadImageFlattened(path string, width, height int) (*tensor.Dense, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, [3]int{}, err
+		return nil, err
 	}
 	defer file.Close()
 
@@ -120,24 +106,32 @@ func LoadImageRGB(path string, width, height int) (*tensor.Dense, [3]int, error)
 	case ".png":
 		img, err = png.Decode(file)
 	default:
-		return nil, [3]int{}, err
+		return nil, fmt.Errorf("unsupported image format: %s", ext)
 	}
 	if err != nil {
-		return nil, [3]int{}, err
+		return nil, err
 	}
 
-	resized := resize.Resize(uint(width), uint(height), img, resize.Lanczos3)
-	channels := 3
-	pixels := make([]float64, channels*width*height)
+	grayImg := image.NewGray(img.Bounds())
+	draw.Draw(grayImg, img.Bounds(), img, image.Point{}, draw.Src)
+
+	resized := resize.Resize(uint(width), uint(height), grayImg, resize.Lanczos3)
+	resizedGray, ok := resized.(*image.Gray)
+	if !ok {
+		b := resized.Bounds()
+		gray := image.NewGray(b)
+		draw.Draw(gray, b, resized, b.Min, draw.Src)
+		resizedGray = gray
+	}
+
+	pixels := make([]float64, width*height)
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			r, g, b, _ := resized.At(x, y).RGBA()
-			pixels[0*width*height+y*width+x] = float64(r) / 65535.0
-			pixels[1*width*height+y*width+x] = float64(g) / 65535.0
-			pixels[2*width*height+y*width+x] = float64(b) / 65535.0
+			c := resizedGray.GrayAt(x, y)
+			pixels[y*width+x] = float64(c.Y) / 255.0
 		}
 	}
-	return tensor.New(tensor.WithShape(1, channels*width*height), tensor.WithBacking(pixels)), [3]int{channels, height, width}, nil
+	return tensor.New(tensor.WithShape(1, width*height), tensor.WithBacking(pixels)), nil
 }
 
 func GetClassNamesFromDir(root string) ([]string, error) {
@@ -167,6 +161,13 @@ func LoadImagePathsAndLabels(root string, classNames []string) ([]ImageSample, e
 		if info.IsDir() {
 			return nil
 		}
+
+		// Check if it's an image file
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+			return nil
+		}
+
 		dir := filepath.Base(filepath.Dir(path))
 		classIdx, ok := classToIdx[dir]
 		if !ok {
@@ -179,40 +180,4 @@ func LoadImagePathsAndLabels(root string, classNames []string) ([]ImageSample, e
 		return nil, err
 	}
 	return samples, nil
-}
-
-func LoadImageDataset(root string, classNames []string) ([]*tensor.Dense, [][]float64, error) {
-	var features []*tensor.Dense
-	var labels [][]float64
-	classToIdx := make(map[string]int)
-	for i, name := range classNames {
-		classToIdx[name] = i
-	}
-
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		dir := filepath.Base(filepath.Dir(path))
-		classIdx, ok := classToIdx[dir]
-		if !ok {
-			return nil
-		}
-		imgMat, err := LoadImage(path, 28, 28)
-		if err != nil {
-			return nil
-		}
-		features = append(features, imgMat)
-		label := make([]float64, len(classNames))
-		label[classIdx] = 1.0
-		labels = append(labels, label)
-		return nil
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return features, labels, nil
 }

@@ -39,15 +39,15 @@ func (l *LeakyReLU) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 			inputData[i] = l.Alpha
 		}
 	}
-	
+
 	// Element-wise multiplication with gradOutput
 	result, _ := tensor.Mul(grad, gradOutput)
 	return result.(*tensor.Dense)
 }
 
-func (l *LeakyReLU) GetWeights() *tensor.Dense                    { return nil }
-func (l *LeakyReLU) GetGradients() *tensor.Dense                  { return nil }
-func (l *LeakyReLU) UpdateWeights(weightsUpdate *tensor.Dense)    {}
-func (l *LeakyReLU) GetBiases() *tensor.Dense                     { return nil }
-func (l *LeakyReLU) GetBiasGradients() *tensor.Dense              { return nil }
-func (l *LeakyReLU) UpdateBiases(biasUpdate *tensor.Dense)        {}
+func (l *LeakyReLU) GetWeights() *tensor.Dense                 { return nil }
+func (l *LeakyReLU) GetGradients() *tensor.Dense               { return nil }
+func (l *LeakyReLU) UpdateWeights(weightsUpdate *tensor.Dense) {}
+func (l *LeakyReLU) GetBiases() *tensor.Dense                  { return nil }
+func (l *LeakyReLU) GetBiasGradients() *tensor.Dense           { return nil }
+func (l *LeakyReLU) UpdateBiases(biasUpdate *tensor.Dense)     {}

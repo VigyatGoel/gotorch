@@ -49,3 +49,8 @@ dist/
 
 # Dataset
 mnist/
+cifar10/
+
+# AI Agent.md
+Qwen.md
+GEMINI.md

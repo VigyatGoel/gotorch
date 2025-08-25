@@ -44,33 +44,33 @@ func NewLinear(inFeatures, outFeatures int) *Linear {
 
 func (l *Linear) Forward(x *tensor.Dense) *tensor.Dense {
 	l.inputMat = x
-	
+
 	// Matrix multiplication: x * weightMat
 	result, err := tensor.MatMul(x, l.weightMat)
 	if err != nil {
 		panic(err)
 	}
-	
+
 	// Get the result shape
 	resultShape := result.Shape()
 	batchSize := resultShape[0]
-	
+
 	// Create a bias tensor with the same shape as result by repeating the bias
 	biasData := l.biasMat.Data().([]float64)
 	expandedBiasData := make([]float64, batchSize*len(biasData))
 	for i := 0; i < batchSize; i++ {
 		copy(expandedBiasData[i*len(biasData):(i+1)*len(biasData)], biasData)
 	}
-	
+
 	// Create the expanded bias tensor
 	expandedBias := tensor.New(tensor.WithShape(resultShape...), tensor.WithBacking(expandedBiasData))
-	
+
 	// Add bias
 	resultWithBias, err := tensor.Add(result, expandedBias)
 	if err != nil {
 		panic(err)
 	}
-	
+
 	return resultWithBias.(*tensor.Dense)
 }
 
@@ -79,7 +79,7 @@ func (l *Linear) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	inputT, _ := tensor.Transpose(l.inputMat)
 	weightGrad, _ := tensor.MatMul(inputT, gradOutput)
 	l.dWeightMat = weightGrad.(*tensor.Dense)
-	
+
 	// Calculate bias gradients: sum(gradOutput, axis=0)
 	gradShape := gradOutput.Shape()
 	if len(gradShape) > 1 {
@@ -103,11 +103,11 @@ func (l *Linear) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 		l.dBiasMat = gradOutput.Clone().(*tensor.Dense)
 		l.dBiasMat.Reshape(1, gradOutput.Shape()[0])
 	}
-	
+
 	// Calculate input gradients: gradOutput * weightMat.T
 	weightT, _ := tensor.Transpose(l.weightMat)
 	gradInputMat, _ := tensor.MatMul(gradOutput, weightT)
-	
+
 	return gradInputMat.(*tensor.Dense)
 }
 
