@@ -66,9 +66,10 @@ func LoadImageAs4D(path string, width, height int, grayscale bool) (*tensor.Dens
 			for x := 0; x < width; x++ {
 				r, g, b, _ := resized.At(x, y).RGBA()
 				// Store in CHW format (channels, height, width)
-				pixels[0*height*width+y*width+x] = float64(r) / 65535.0
-				pixels[1*height*width+y*width+x] = float64(g) / 65535.0
-				pixels[2*height*width+y*width+x] = float64(b) / 65535.0
+				// RGBA returns values in [0, 65535] range, convert to [0, 255] then normalize
+				pixels[0*height*width+y*width+x] = float64(r>>8) / 255.0
+				pixels[1*height*width+y*width+x] = float64(g>>8) / 255.0
+				pixels[2*height*width+y*width+x] = float64(b>>8) / 255.0
 			}
 		}
 	}

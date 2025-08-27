@@ -11,19 +11,21 @@ import (
 // that's been designed specifically for training deep neural networks.
 //
 // It follows the standard PyTorch formulation:
-//   m_t = beta1 * m_{t-1} + (1 - beta1) * gradient
-//   v_t = beta2 * v_{t-1} + (1 - beta2) * gradient^2
-//   m_hat = m_t / (1 - beta1^t)
-//   v_hat = v_t / (1 - beta2^t)
-//   parameter = parameter - learning_rate * m_hat / (sqrt(v_hat) + epsilon)
+//
+//	m_t = beta1 * m_{t-1} + (1 - beta1) * gradient
+//	v_t = beta2 * v_{t-1} + (1 - beta2) * gradient^2
+//	m_hat = m_t / (1 - beta1^t)
+//	v_hat = v_t / (1 - beta2^t)
+//	parameter = parameter - learning_rate * m_hat / (sqrt(v_hat) + epsilon)
 //
 // where:
-//   m_t and v_t are the first and second moment vectors
-//   beta1 and beta2 are the exponential decay rates for the moment estimates
-//   gradient is the gradient of the loss with respect to the parameter
-//   learning_rate is the learning rate
-//   epsilon is a small constant for numerical stability
-//   t is the time step
+//
+//	m_t and v_t are the first and second moment vectors
+//	beta1 and beta2 are the exponential decay rates for the moment estimates
+//	gradient is the gradient of the loss with respect to the parameter
+//	learning_rate is the learning rate
+//	epsilon is a small constant for numerical stability
+//	t is the time step
 type Adam struct {
 	LR      float64
 	Beta1   float64

@@ -8,8 +8,9 @@ import (
 
 // SGDMomentum implements the Stochastic Gradient Descent optimizer with Momentum.
 // It follows the standard PyTorch formulation:
-//   v_t = momentum * v_{t-1} + gradient
-//   parameter = parameter - learning_rate * v_t
+//
+//	v_t = momentum * v_{t-1} + gradient
+//	parameter = parameter - learning_rate * v_t
 //
 // where v_t is the velocity at time step t, momentum is the momentum coefficient,
 // gradient is the gradient of the loss with respect to the parameter,
@@ -47,7 +48,7 @@ func (sgd *SGDMomentum) Step(weights *tensor.Dense, gradients *tensor.Dense) *te
 	if weights == nil || gradients == nil {
 		return weights
 	}
-	
+
 	shape := weights.Shape()
 	if len(shape) == 0 {
 		fmt.Println("SGD optimizer skipping update - empty weights or gradients")

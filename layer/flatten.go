@@ -47,3 +47,8 @@ func (f *Flatten) UpdateWeights(weightsUpdate *tensor.Dense) {}
 func (f *Flatten) GetBiases() *tensor.Dense                  { return nil }
 func (f *Flatten) GetBiasGradients() *tensor.Dense           { return nil }
 func (f *Flatten) UpdateBiases(biasUpdate *tensor.Dense)     {}
+
+// ClearCache clears cached data to prevent memory leaks
+func (f *Flatten) ClearCache() {
+	f.inputShape = nil
+}

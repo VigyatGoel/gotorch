@@ -6,7 +6,7 @@ import (
 )
 
 type Sigmoid struct {
-	output *tensor.Dense  // Store output for use in backward pass (needed for gradient computation)
+	output *tensor.Dense // Store output for use in backward pass (needed for gradient computation)
 }
 
 func NewSigmoid() *Sigmoid {
@@ -28,7 +28,7 @@ func (s *Sigmoid) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	deriv := s.output.Clone().(*tensor.Dense)
 	derivData := deriv.Data().([]float64)
 	outputData := s.output.Data().([]float64)
-	
+
 	// Calculate output * (1 - output) directly
 	for i, v := range outputData {
 		derivData[i] = v * (1.0 - v)

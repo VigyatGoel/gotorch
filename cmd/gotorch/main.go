@@ -4,16 +4,21 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 )
 
 const (
-	envVarName  = "ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH"
-	envVarValue = "go1.25"
+	envVarName1  = "ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH"
+	envVarValue1 = "go1.25"
+	envVarName2  = "GOEXPERIMENT"
+	envVarValue2 = "greenteagc"
+	version      = "v1.0.0"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: gotorch <command> [args...]")
+		showHelp()
 		os.Exit(1)
 	}
 
@@ -23,19 +28,62 @@ func main() {
 	switch command {
 	case "run":
 		if len(args) < 1 {
-			fmt.Println("Usage: gotorch run <file>")
+			fmt.Println("❌ Error: No file specified")
+			fmt.Println("Usage: gotorch run <file.go> [args...]")
 			os.Exit(1)
 		}
 		runGoFile(args[0], args[1:])
+	case "version", "-v", "--version":
+		fmt.Printf("GoTorch CLI %s\n", version)
+	case "help", "-h", "--help":
+		showHelp()
 	default:
-		fmt.Printf("Unknown command: %s\n", command)
+		fmt.Printf("❌ Unknown command: %s\n", command)
+		showHelp()
 		os.Exit(1)
 	}
 }
 
+func showHelp() {
+	fmt.Println("🔥 GoTorch CLI - Deep Learning Framework for Go")
+	fmt.Printf("Version: %s\n\n", version)
+	fmt.Println("USAGE:")
+	fmt.Println("  gotorch <command> [arguments]")
+	fmt.Println("")
+	fmt.Println("COMMANDS:")
+	fmt.Println("  run <file.go> [args...]  Run a GoTorch program with proper environment")
+	fmt.Println("  version                  Show version information")
+	fmt.Println("  help                     Show this help message")
+	fmt.Println("")
+	fmt.Println("EXAMPLES:")
+	fmt.Println("  gotorch run train_minimal.go")
+	fmt.Println("  gotorch run examples/train_cnn.go")
+	fmt.Println("  gotorch run my_model.go --epochs 100")
+}
+
 func runGoFile(filename string, args []string) {
-	// Set the environment variable
-	env := append(os.Environ(), fmt.Sprintf("%s=%s", envVarName, envVarValue))
+	// Check if file exists
+	if !strings.HasSuffix(filename, ".go") {
+		fmt.Printf("⚠️  Warning: '%s' doesn't have .go extension\n", filename)
+	}
+
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		fmt.Printf("❌ Error: File '%s' not found\n", filename)
+		os.Exit(1)
+	}
+
+	// Show what we're running
+	fmt.Printf("🚀 Running: %s\n", filepath.Base(filename))
+	if len(args) > 0 {
+		fmt.Printf("📝 Args: %s\n", strings.Join(args, " "))
+	}
+	fmt.Println(strings.Repeat("-", 50))
+
+	// Set the environment variables
+	env := append(os.Environ(), 
+		fmt.Sprintf("%s=%s", envVarName1, envVarValue1),
+		fmt.Sprintf("%s=%s", envVarName2, envVarValue2),
+	)
 
 	// Prepare the command
 	cmdArgs := append([]string{"run", filename}, args...)
@@ -47,13 +95,14 @@ func runGoFile(filename string, args []string) {
 
 	// Run the command
 	if err := cmd.Run(); err != nil {
-		// The error from the executed command is already printed to stderr
-		// We just need to exit with the same code
 		if exitError, ok := err.(*exec.ExitError); ok {
+			fmt.Printf("\n❌ Program exited with code %d\n", exitError.ExitCode())
 			os.Exit(exitError.ExitCode())
 		} else {
-			fmt.Fprintf(os.Stderr, "Error running command: %v\n", err)
+			fmt.Fprintf(os.Stderr, "\n❌ Error running command: %v\n", err)
 			os.Exit(1)
 		}
+	} else {
+		fmt.Println("\n✅ Program completed successfully")
 	}
 }

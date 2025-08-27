@@ -12,13 +12,15 @@ type MaxPool2D struct {
 	PoolSize int
 	Stride   int
 
-	// For backward pass
 	input      *tensor.Dense
-	maxIndices []int // Store indices of max values for backward pass
+	maxIndices [][]int // Partitioned per batch to avoid race conditions
 }
 
 func NewMaxPool2D(poolSize, stride int) *MaxPool2D {
-	if stride == 0 {
+	if poolSize <= 0 {
+		panic("poolSize must be greater than 0")
+	}
+	if stride <= 0 {
 		stride = poolSize // Default stride equals pool size
 	}
 	return &MaxPool2D{
@@ -28,10 +30,8 @@ func NewMaxPool2D(poolSize, stride int) *MaxPool2D {
 }
 
 func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
-	// Store input for backward pass
 	m.input = input.Clone().(*tensor.Dense)
 
-	// Input shape: [batchSize, channels, height, width]
 	inputShape := input.Shape()
 	if len(inputShape) != 4 {
 		panic(fmt.Sprintf("Input to MaxPool2D must be 4D tensor, got shape %v", inputShape))
@@ -42,23 +42,40 @@ func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
 	height := inputShape[2]
 	width := inputShape[3]
 
-	// Calculate output dimensions
 	outputHeight := (height-m.PoolSize)/m.Stride + 1
 	outputWidth := (width-m.PoolSize)/m.Stride + 1
 
-	// Initialize output and max indices
-	outputData := make([]float64, batchSize*channels*outputHeight*outputWidth)
-	m.maxIndices = make([]int, batchSize*channels*outputHeight*outputWidth)
+	if outputHeight <= 0 || outputWidth <= 0 {
+		panic(fmt.Sprintf("Invalid output dimensions: %dx%d", outputHeight, outputWidth))
+	}
 
-	inputData := input.Data().([]float64)
+	// Safe type assertion with error handling
+	inputData, ok := input.Data().([]float64)
+	if !ok {
+		panic("Input tensor data must be []float64")
+	}
+
+	// Partition output data and max indices per batch to avoid race conditions
+	batchOutputs := make([][]float64, batchSize)
+	batchMaxIndices := make([][]int, batchSize)
+	outChannelSize := outputHeight * outputWidth
+	batchOutChannelSize := channels * outChannelSize
+
+	for b := 0; b < batchSize; b++ {
+		batchOutputs[b] = make([]float64, batchOutChannelSize)
+		batchMaxIndices[b] = make([]int, batchOutChannelSize)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(batchSize)
 
-	// Perform max pooling
 	for b := 0; b < batchSize; b++ {
 		go func(b int) {
 			defer wg.Done()
+
+			inputBatchOffset := b * channels * height * width
+			inChannelSize := height * width
+
 			for c := 0; c < channels; c++ {
 				for oh := 0; oh < outputHeight; oh++ {
 					for ow := 0; ow < outputWidth; ow++ {
@@ -75,11 +92,7 @@ func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
 								w := startW + pw
 
 								if h < height && w < width {
-									inputIdx := b*(channels*height*width) +
-										c*(height*width) +
-										h*width +
-										w
-
+									inputIdx := inputBatchOffset + c*inChannelSize + h*width + w
 									if inputData[inputIdx] > maxVal {
 										maxVal = inputData[inputIdx]
 										maxIdx = inputIdx
@@ -88,19 +101,24 @@ func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
 							}
 						}
 
-						outputIdx := b*(channels*outputHeight*outputWidth) +
-							c*(outputHeight*outputWidth) +
-							oh*outputWidth +
-							ow
-
-						outputData[outputIdx] = maxVal
-						m.maxIndices[outputIdx] = maxIdx
+						outputIdx := c*outChannelSize + oh*outputWidth + ow
+						batchOutputs[b][outputIdx] = maxVal
+						batchMaxIndices[b][outputIdx] = maxIdx
 					}
 				}
 			}
 		}(b)
 	}
 	wg.Wait()
+
+	// Combine batch outputs and max indices
+	outputData := make([]float64, batchSize*batchOutChannelSize)
+	m.maxIndices = make([][]int, batchSize)
+
+	for b := 0; b < batchSize; b++ {
+		copy(outputData[b*batchOutChannelSize:(b+1)*batchOutChannelSize], batchOutputs[b])
+		m.maxIndices[b] = batchMaxIndices[b]
+	}
 
 	return tensor.New(
 		tensor.WithShape(batchSize, channels, outputHeight, outputWidth),
@@ -119,28 +137,45 @@ func (m *MaxPool2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	outputHeight := outputShape[2]
 	outputWidth := outputShape[3]
 
-	// Initialize gradient for input
-	inputGradData := make([]float64, batchSize*channels*height*width)
-	gradOutputData := gradOutput.Data().([]float64)
+	// Safe type assertion with error handling
+	gradOutputData, ok := gradOutput.Data().([]float64)
+	if !ok {
+		panic("GradOutput tensor data must be []float64")
+	}
+
+	// Partition input gradients per batch to avoid race conditions
+	batchInputGrads := make([][]float64, batchSize)
+	inChannelSize := height * width
+	batchInChannelSize := channels * inChannelSize
+
+	for b := 0; b < batchSize; b++ {
+		batchInputGrads[b] = make([]float64, batchInChannelSize)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(batchSize)
 
-	// Distribute gradients to max positions, parallelized over the batch
 	for b := 0; b < batchSize; b++ {
 		go func(b int) {
 			defer wg.Done()
+
+			outChannelSize := outputHeight * outputWidth
+			batchOutChannelSize := channels * outChannelSize
+			gradOutputBatchOffset := b * batchOutChannelSize
+
 			for c := 0; c < channels; c++ {
 				for oh := 0; oh < outputHeight; oh++ {
 					for ow := 0; ow < outputWidth; ow++ {
-						outputIdx := b*(channels*outputHeight*outputWidth) +
-							c*(outputHeight*outputWidth) +
-							oh*outputWidth +
-							ow
+						outputIdx := c*outChannelSize + oh*outputWidth + ow
+						gradOutputIdx := gradOutputBatchOffset + outputIdx
 
-						maxIdx := m.maxIndices[outputIdx]
+						maxIdx := m.maxIndices[b][outputIdx]
 						if maxIdx >= 0 {
-							inputGradData[maxIdx] += gradOutputData[outputIdx]
+							// Convert global index to batch-local index
+							localMaxIdx := maxIdx - b*batchInChannelSize
+							if localMaxIdx >= 0 && localMaxIdx < batchInChannelSize {
+								batchInputGrads[b][localMaxIdx] += gradOutputData[gradOutputIdx]
+							}
 						}
 					}
 				}
@@ -149,16 +184,32 @@ func (m *MaxPool2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	}
 	wg.Wait()
 
+	// Combine input gradients from all batches
+	inputGradData := make([]float64, batchSize*batchInChannelSize)
+	for b := 0; b < batchSize; b++ {
+		copy(inputGradData[b*batchInChannelSize:(b+1)*batchInChannelSize], batchInputGrads[b])
+	}
+
 	return tensor.New(
 		tensor.WithShape(batchSize, channels, height, width),
 		tensor.WithBacking(inputGradData),
 	)
 }
 
-// Implement Layer interface
+// Layer interface methods
 func (m *MaxPool2D) GetWeights() *tensor.Dense                 { return nil }
 func (m *MaxPool2D) GetGradients() *tensor.Dense               { return nil }
 func (m *MaxPool2D) UpdateWeights(weightsUpdate *tensor.Dense) {}
 func (m *MaxPool2D) GetBiases() *tensor.Dense                  { return nil }
 func (m *MaxPool2D) GetBiasGradients() *tensor.Dense           { return nil }
 func (m *MaxPool2D) UpdateBiases(biasUpdate *tensor.Dense)     {}
+
+func (m *MaxPool2D) String() string {
+	return fmt.Sprintf("MaxPool2D(pool_size=%d, stride=%d)", m.PoolSize, m.Stride)
+}
+
+// ClearCache clears cached data to prevent memory leaks
+func (m *MaxPool2D) ClearCache() {
+	m.input = nil
+	m.maxIndices = nil
+}

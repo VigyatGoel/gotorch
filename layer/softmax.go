@@ -6,8 +6,8 @@ import (
 )
 
 type Softmax struct {
-	input  *tensor.Dense  // Store input for potential use in backward pass
-	output *tensor.Dense  // Store output for potential use in backward pass
+	input  *tensor.Dense // Store input for potential use in backward pass
+	output *tensor.Dense // Store output for potential use in backward pass
 }
 
 func NewSoftmax() *Softmax {
@@ -76,12 +76,12 @@ func (s *Softmax) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	// IMPORTANT: This implementation assumes that the Softmax layer is used in combination
 	// with Cross-Entropy Loss. In this specific case, the gradient simplifies to just
 	// passing through the gradient from the loss function (which is typically predictions - targets).
-	// 
+	//
 	// For a standalone Softmax layer, the full Jacobian computation would be required:
 	// gradInput_i = sum_j (gradOutput_j * (output_i * (I_ij - output_j)))
 	// where I_ij is 1 if i==j and 0 otherwise.
-	// 
-	// This optimization is commonly used in practice when Softmax is combined with 
+	//
+	// This optimization is commonly used in practice when Softmax is combined with
 	// Cross-Entropy Loss for classification tasks.
 	return gradOutput
 }
@@ -106,4 +106,10 @@ func (s *Softmax) GetBiasGradients() *tensor.Dense {
 }
 
 func (s *Softmax) UpdateBiases(biasUpdate *tensor.Dense) {
+}
+
+// ClearCache clears cached data to prevent memory leaks
+func (s *Softmax) ClearCache() {
+	s.input = nil
+	s.output = nil
 }

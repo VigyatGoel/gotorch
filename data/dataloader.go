@@ -33,6 +33,8 @@ type DataLoader struct {
 	Seed              int64
 	SplitRatio        float64
 	BatchSize         int
+	Streaming         bool // New field for streaming mode
+	Prefetch          int  // Number of batches to prefetch when streaming
 	Features          *tensor.Dense
 	Targets           *tensor.Dense
 	ClassNames        []string
@@ -51,7 +53,7 @@ type Batch struct {
 	Targets  *tensor.Dense
 }
 
-func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoader {
+func NewDataLoader(filePath string, dataType DataType, batchSize int, streaming bool) *DataLoader {
 	return &DataLoader{
 		FilePath:   filePath,
 		DataType:   dataType,
@@ -59,6 +61,7 @@ func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoade
 		Seed:       42,
 		SplitRatio: 0.8,
 		BatchSize:  batchSize,
+		Streaming:  streaming,
 		ClassNames: []string{},
 		Grayscale:  true, // Default to grayscale
 	}
@@ -76,6 +79,30 @@ func (dl *DataLoader) Load() error {
 			}
 			dl.ClassNames = classNames
 		}
+
+		if dl.Streaming {
+			// For streaming mode, just load paths without loading actual images
+			samples, err := LoadImagePathsAndLabels(dl.ImageDir, dl.ClassNames)
+			if err != nil {
+				return fmt.Errorf("failed to load image paths: %w", err)
+			}
+			dl.ImageSamples = samples
+
+			// Split samples for streaming
+			if dl.Shuffle {
+				r := rand.New(rand.NewSource(dl.Seed))
+				r.Shuffle(len(dl.ImageSamples), func(i, j int) {
+					dl.ImageSamples[i], dl.ImageSamples[j] = dl.ImageSamples[j], dl.ImageSamples[i]
+				})
+			}
+			total := len(dl.ImageSamples)
+			splitIndex := int(float64(total) * dl.SplitRatio)
+			dl.trainImageSamples = dl.ImageSamples[:splitIndex]
+			dl.testImageSamples = dl.ImageSamples[splitIndex:]
+			return nil
+		}
+
+		// Non-streaming mode: load all images into memory
 		samples, err := LoadImagePathsAndLabels(dl.ImageDir, dl.ClassNames)
 		if err != nil {
 			return fmt.Errorf("failed to load image paths: %w", err)
@@ -298,12 +325,254 @@ func (dl *DataLoader) GetBatches(features *tensor.Dense, targets *tensor.Dense, 
 	return batches
 }
 
+// BatchIterator interface for streaming
+type BatchIterator interface {
+	HasNext() bool
+	Next() *Batch
+	Close() // Add Close method to clean up resources
+}
+
+// StreamingIterator implements BatchIterator for memory-efficient streaming
+type StreamingIterator struct {
+	samples    []ImageSample
+	indices    []int
+	batchSize  int
+	current    int
+	dl         *DataLoader
+	prefetchCh chan *Batch
+	done       chan bool
+	closed     bool
+}
+
+func (iter *StreamingIterator) HasNext() bool {
+	return iter.current < len(iter.samples) && !iter.closed
+}
+
+func (iter *StreamingIterator) Next() *Batch {
+	if iter.closed {
+		return nil
+	}
+
+	if iter.prefetchCh != nil {
+		select {
+		case batch := <-iter.prefetchCh:
+			return batch
+		default:
+			// Fallback to synchronous loading if prefetch buffer is empty
+			return iter.loadBatch()
+		}
+	}
+
+	return iter.loadBatch()
+}
+
+func (iter *StreamingIterator) Close() {
+	if iter.closed {
+		return
+	}
+	iter.closed = true
+
+	if iter.done != nil {
+		close(iter.done)
+	}
+
+	// Clear channels to help with garbage collection
+	iter.prefetchCh = nil
+	iter.done = nil
+}
+
+func (iter *StreamingIterator) loadBatch() *Batch {
+	end := iter.current + iter.batchSize
+	if end > len(iter.samples) {
+		end = len(iter.samples)
+	}
+
+	var features []*tensor.Dense
+	labels := make([][]float64, 0, end-iter.current)
+
+	for _, idx := range iter.indices[iter.current:end] {
+		sample := iter.samples[idx]
+		var imgMat *tensor.Dense
+		var err error
+
+		if iter.dl.Grayscale {
+			imgMat, err = LoadImageGrayscale(sample.Path, iter.dl.ImageWidth, iter.dl.ImageHeight)
+		} else {
+			imgMat, err = LoadImageRGB(sample.Path, iter.dl.ImageWidth, iter.dl.ImageHeight)
+		}
+
+		if err != nil {
+			continue
+		}
+
+		features = append(features, imgMat)
+		label := make([]float64, len(iter.dl.ClassNames))
+		label[sample.ClassIdx] = 1.0
+		labels = append(labels, label)
+	}
+
+	iter.current = end
+
+	if len(features) == 0 {
+		return iter.loadBatch()
+	}
+
+	imgShape := features[0].Shape()
+	channels := imgShape[1]
+	height := imgShape[2]
+	width := imgShape[3]
+	currentBatchSize := len(features)
+
+	featuresData := make([]float64, 0, currentBatchSize*channels*height*width)
+	for _, f := range features {
+		featuresData = append(featuresData, f.Data().([]float64)...)
+	}
+
+	batchFeatures := tensor.New(
+		tensor.WithShape(currentBatchSize, channels, height, width),
+		tensor.WithBacking(featuresData),
+	)
+
+	labelsData := make([]float64, 0, len(labels)*len(iter.dl.ClassNames))
+	for _, l := range labels {
+		labelsData = append(labelsData, l...)
+	}
+	batchTargets := tensor.New(tensor.WithShape(len(labels), len(iter.dl.ClassNames)), tensor.WithBacking(labelsData))
+
+	return &Batch{Features: batchFeatures, Targets: batchTargets}
+}
+
+func (iter *StreamingIterator) startPrefetching() {
+	if iter.dl.Prefetch <= 0 || iter.closed {
+		return
+	}
+
+	iter.prefetchCh = make(chan *Batch, iter.dl.Prefetch)
+	iter.done = make(chan bool)
+
+	go func() {
+		defer close(iter.prefetchCh)
+		for iter.current < len(iter.samples) && !iter.closed {
+			select {
+			case <-iter.done:
+				return
+			default:
+				batch := iter.loadBatch()
+				if batch != nil && !iter.closed {
+					select {
+					case iter.prefetchCh <- batch:
+					case <-iter.done:
+						return
+					}
+				}
+			}
+		}
+	}()
+}
+
+// BatchSliceIterator wraps []Batch to implement BatchIterator
+type BatchSliceIterator struct {
+	batches []Batch
+	current int
+}
+
+func (iter *BatchSliceIterator) HasNext() bool {
+	return iter.current < len(iter.batches)
+}
+
+func (iter *BatchSliceIterator) Next() *Batch {
+	if !iter.HasNext() {
+		return nil
+	}
+	batch := &iter.batches[iter.current]
+	iter.current++
+	return batch
+}
+
+func (iter *BatchSliceIterator) Close() {
+	// No resources to clean up for slice iterator
+}
+
 func (dl *DataLoader) GetTrainImageBatches(epoch int, batchSize int) []Batch {
+	if dl.Streaming {
+		return dl.getStreamingImageBatches(dl.trainImageSamples, epoch, batchSize)
+	}
 	return dl.getImageBatches(dl.trainImageSamples, epoch, batchSize)
 }
 
+func (dl *DataLoader) GetTestIterator(batchSize int) BatchIterator {
+	if dl.Streaming {
+		total := len(dl.testImageSamples)
+		indices := make([]int, total)
+		for i := 0; i < total; i++ {
+			indices[i] = i
+		}
+
+		iter := &StreamingIterator{
+			samples:   dl.testImageSamples,
+			indices:   indices,
+			batchSize: batchSize,
+			current:   0,
+			dl:        dl,
+		}
+		iter.startPrefetching()
+		return iter
+	} else {
+		batches := dl.getImageBatches(dl.testImageSamples, 0, batchSize)
+		return &BatchSliceIterator{
+			batches: batches,
+			current: 0,
+		}
+	}
+}
+
 func (dl *DataLoader) GetTestImageBatches(batchSize int) []Batch {
+	if dl.Streaming {
+		return dl.getStreamingImageBatches(dl.testImageSamples, 0, batchSize)
+	}
 	return dl.getImageBatches(dl.testImageSamples, 0, batchSize)
+}
+
+// GetTrainIterator returns iterator that works for both streaming and non-streaming
+func (dl *DataLoader) GetTrainIterator(epoch int, batchSize int) BatchIterator {
+	if dl.Streaming {
+		// Return true streaming iterator
+		total := len(dl.trainImageSamples)
+		indices := make([]int, total)
+		for i := 0; i < total; i++ {
+			indices[i] = i
+		}
+
+		if dl.Shuffle {
+			epochSeed := dl.Seed + int64(epoch)
+			r := rand.New(rand.NewSource(epochSeed))
+			r.Shuffle(total, func(i, j int) {
+				indices[i], indices[j] = indices[j], indices[i]
+			})
+		}
+
+		iter := &StreamingIterator{
+			samples:   dl.trainImageSamples,
+			indices:   indices,
+			batchSize: batchSize,
+			current:   0,
+			dl:        dl,
+		}
+		iter.startPrefetching()
+		return iter
+	} else {
+		// Return iterator over pre-loaded batches
+		batches := dl.getImageBatches(dl.trainImageSamples, epoch, batchSize)
+		return &BatchSliceIterator{
+			batches: batches,
+			current: 0,
+		}
+	}
+}
+
+func (dl *DataLoader) getStreamingImageBatches(samples []ImageSample, epoch int, batchSize int) []Batch {
+	// For backward compatibility - streaming should use GetTrainIterator instead
+	return dl.getImageBatches(samples, epoch, batchSize)
 }
 
 func (dl *DataLoader) getImageBatches(samples []ImageSample, epoch int, batchSize int) []Batch {
@@ -446,6 +715,92 @@ func (dl *DataLoader) Split() (trainX, trainY, testX, testY *tensor.Dense) {
 	testY = tensor.New(tensor.WithShape(rows-split, targetCols), tensor.WithBacking(testTargetData))
 
 	return
+}
+
+// TrainBatches returns a channel for PyTorch-style iteration over training batches
+func (dl *DataLoader) TrainBatches(epoch int) <-chan *Batch {
+	ch := make(chan *Batch)
+	go func() {
+		defer close(ch)
+		iter := dl.GetTrainIterator(epoch, dl.BatchSize)
+		defer func() {
+			if closer, ok := iter.(interface{ Close() }); ok {
+				closer.Close()
+			}
+		}()
+
+		for iter.HasNext() {
+			batch := iter.Next()
+			if batch != nil {
+				ch <- batch
+			}
+		}
+	}()
+	return ch
+}
+
+// TestBatches returns a channel for PyTorch-style iteration over test batches
+func (dl *DataLoader) TestBatches() <-chan *Batch {
+	ch := make(chan *Batch)
+	go func() {
+		defer close(ch)
+		iter := dl.GetTestIterator(dl.BatchSize)
+		defer func() {
+			if closer, ok := iter.(interface{ Close() }); ok {
+				closer.Close()
+			}
+		}()
+
+		for iter.HasNext() {
+			batch := iter.Next()
+			if batch != nil {
+				ch <- batch
+			}
+		}
+	}()
+	return ch
+}
+
+// ForEachTrainBatch executes the provided function for each training batch
+func (dl *DataLoader) ForEachTrainBatch(epoch int, fn func(batch *Batch) error) error {
+	iter := dl.GetTrainIterator(epoch, dl.BatchSize)
+	defer func() {
+		if closer, ok := iter.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}()
+
+	for iter.HasNext() {
+		batch := iter.Next()
+		if batch == nil {
+			continue
+		}
+		if err := fn(batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ForEachTestBatch executes the provided function for each test batch
+func (dl *DataLoader) ForEachTestBatch(fn func(batch *Batch) error) error {
+	iter := dl.GetTestIterator(dl.BatchSize)
+	defer func() {
+		if closer, ok := iter.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}()
+
+	for iter.HasNext() {
+		batch := iter.Next()
+		if batch == nil {
+			continue
+		}
+		if err := fn(batch); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (dl *DataLoader) NormalizeFeatures() {

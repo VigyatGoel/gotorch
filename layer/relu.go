@@ -48,3 +48,8 @@ func (r *ReLU) UpdateWeights(weightsUpdate *tensor.Dense) {}
 func (r *ReLU) GetBiases() *tensor.Dense                  { return nil }
 func (r *ReLU) GetBiasGradients() *tensor.Dense           { return nil }
 func (r *ReLU) UpdateBiases(biasUpdate *tensor.Dense)     {}
+
+// ClearCache clears cached data to prevent memory leaks
+func (r *ReLU) ClearCache() {
+	r.input = nil
+}

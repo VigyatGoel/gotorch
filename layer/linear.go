@@ -134,3 +134,8 @@ func (l *Linear) GetBiasGradients() *tensor.Dense {
 func (l *Linear) UpdateBiases(biasUpdate *tensor.Dense) {
 	l.biasMat = biasUpdate.Clone().(*tensor.Dense)
 }
+
+// ClearCache clears cached data to prevent memory leaks
+func (l *Linear) ClearCache() {
+	l.inputMat = nil
+}

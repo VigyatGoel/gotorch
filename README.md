@@ -30,68 +30,74 @@ GoTorch is a deep learning framework implemented in pure Go, designed for simpli
   - Flatten layer for reshaping
   - Activation functions (ReLU, Leaky ReLU, Sigmoid, Softmax, SiLU/Swish)
   - Loss functions (Cross-Entropy, MSE)
-  - Optimizers: SGD(with momentum) and Adam supported
+  - Optimizers: SGD (with momentum) and Adam
   - Sequential model architecture
+- **PyTorch-Style API**:
+  - Familiar training loops: `for batch := range dataLoader.TrainBatches(epoch)`
+  - PyTorch-like model definition and training patterns
+  - Easy migration from PyTorch concepts
+- **Advanced Data Processing**:
+  - **Image Support**: JPEG, PNG with automatic normalization to [0,1]
+  - **Streaming DataLoader**: Memory-efficient for large datasets
+  - **CSV Support**: Automatic feature extraction and preprocessing
+  - **Batch Processing**: Configurable batch sizes with shuffling
+  - Training/testing data splitting with configurable ratios
 - **Model Persistence**:
-  - Save trained models to disk in Binary based .gth format
-  - Load models to perform inference without retraining
-  - Preserves layers, weights, biases, and optimizer configurations
-- **Data Processing**:
-  - CSV data loading with automatic feature extraction
-  - Training/testing data splitting
-  - Data Normalization
-  - Classification and regression support
-- **Modular Design**: Easy to extend with new layers and components
+  - Save/load models in `.gth` format (JSON-based)
+  - Preserves complete model state including optimizer settings
+- **CLI Tool**: User-friendly command-line interface with automatic environment setup
 
 ## Installation
 
+### Install Library
 ```bash
-# Option 1: Use go get to install the package
 go get github.com/VigyatGoel/gotorch
 ```
 
+### Install CLI Tool (Recommended)
 ```bash
-# Option 2: Clone the repository
-git clone https://github.com/VigyatGoel/gotorch.git
+go install github.com/VigyatGoel/gotorch/cmd/gotorch@latest
 ```
 
-After cloning, run:
+### Alternative: Clone Repository
 ```bash
+git clone https://github.com/VigyatGoel/gotorch.git
+cd gotorch
 go mod tidy
+go install ./cmd/gotorch
 ```
 
 ### CLI Tool Usage
 
-GoTorch includes a CLI tool that simplifies running your models by automatically setting the required environment variables.
+GoTorch includes a user-friendly CLI tool that automatically handles environment setup:
 
-To build the CLI tool:
 ```bash
-go build -o gotorch github.com/VigyatGoel/gotorch/cmd/gotorch
+# Run any GoTorch program
+gotorch run examples/train_minimal.go
+gotorch run examples/train_cnn.go
+gotorch run your_program.go
+
+# Pass arguments to your program
+gotorch run train.go --epochs 100 --lr 0.001
+
+# Get help
+gotorch help
+gotorch version
 ```
 
-To run a Go program that uses GoTorch:
-```bash
-./gotorch run your_program.go
-```
-
-You can also pass arguments to your Go program:
-```bash
-./gotorch run your_program.go arg1 arg2
-```
-
-This is equivalent to running:
-```bash
-ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25 go run your_program.go arg1 arg2
-```
+The CLI automatically sets `ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25` which is required for GoTorch.
 
 ## Quick Start
 
 ```bash
-# Build the CLI tool
-go build -o gotorch github.com/VigyatGoel/gotorch/cmd/gotorch
+# Install GoTorch and CLI
+go install github.com/VigyatGoel/gotorch/cmd/gotorch@latest
 
-# Run the example
-./gotorch run examples/train_basic.go
+# Run minimal training example
+gotorch run examples/train_minimal.go
+
+# Or train on tabular data
+gotorch run examples/train_basic_minimal.go
 ```
 
 ## Architecture
@@ -121,15 +127,51 @@ GoTorch's architecture consists of the following key components:
 
 ### Data Handling
 
-- **DataLoader**: For loading and preprocessing CSV data
+- **DataLoader**: Unified interface for CSV and image data
+- **Image Processing**: Automatic loading, resizing, and normalization
+- **Streaming Support**: Memory-efficient processing for large datasets
+- **Batch Iteration**: PyTorch-style `for batch := range` loops
 
 ## Examples
 
-The project includes an example classification model using the Iris dataset:
+GoTorch includes multiple example implementations:
 
+### Tabular Data (CSV)
 ```bash
-# Train a classification model on Iris dataset
-./gotorch run examples/train_basic.go
+# Train on Iris dataset (CSV)
+gotorch run examples/train_basic_minimal.go
+```
+
+### Image Classification (CNN)
+```bash
+# Train CNN on CIFAR-10 images
+gotorch run examples/train_minimal.go
+gotorch run examples/train_cnn.go
+```
+
+### PyTorch-Style Training Loop
+```go
+for epoch := 0; epoch < epochs; epoch++ {
+    runningLoss := 0.0
+    correct, total := 0, 0
+    
+    for batch := range dataLoader.TrainBatches(epoch) {
+        // Forward pass
+        preds := model.Forward(batch.Features)
+        loss := criterion.Forward(preds, batch.Targets)
+        
+        // Backward pass
+        model.GetOptimizer().ZeroGrad()
+        grad := criterion.Backward()
+        model.Backward(grad)
+        
+        runningLoss += loss
+        // Calculate accuracy...
+    }
+    
+    fmt.Printf("Epoch [%d/%d] Loss: %.4f Train Acc: %.2f%%\n", 
+               epoch+1, epochs, runningLoss/batchCount, trainAcc)
+}
 ```
 
 ## Customization
