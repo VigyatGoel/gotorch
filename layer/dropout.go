@@ -7,16 +7,16 @@ import (
 
 // Dropout implements dropout regularization to prevent overfitting
 type Dropout struct {
-	p        float64       // dropout probability (0 to 1)
-	training bool          // training mode flag
-	mask     *tensor.Dense // binary mask for dropped neurons
+	DropoutRate float64       // dropout probability (0 to 1)
+	training    bool          // training mode flag
+	mask        *tensor.Dense // binary mask for dropped neurons
 }
 
 // NewDropout creates a new dropout layer with given probability
 func NewDropout(p float64) *Dropout {
 	return &Dropout{
-		p:        p,
-		training: true,
+		DropoutRate: p,
+		training:    true,
 	}
 }
 
@@ -27,16 +27,16 @@ func (d *Dropout) SetTraining(training bool) {
 
 // Forward applies dropout mask during training, scales by 1/(1-p)
 func (d *Dropout) Forward(x *tensor.Dense) *tensor.Dense {
-	if !d.training || d.p == 0.0 {
+	if !d.training || d.DropoutRate == 0.0 {
 		return x.Clone().(*tensor.Dense)
 	}
 
 	result := x.Clone().(*tensor.Dense)
 	data := result.Data().([]float64)
 	maskData := make([]float64, len(data))
-	scale := 1.0 / (1.0 - d.p)
+	scale := 1.0 / (1.0 - d.DropoutRate)
 	for i := range data {
-		if rand.Float64() < d.p {
+		if rand.Float64() < d.DropoutRate {
 			maskData[i] = 0.0
 			data[i] = 0.0
 		} else {
