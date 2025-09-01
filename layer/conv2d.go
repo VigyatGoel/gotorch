@@ -9,20 +9,22 @@ import (
 	"gorgonia.org/tensor"
 )
 
+// Conv2D implements 2D convolution with learnable filters
 type Conv2D struct {
-	InChannels  int
-	OutChannels int
-	KernelSize  int
-	Stride      int
-	Padding     int
+	InChannels  int // number of input channels
+	OutChannels int // number of output channels (filters)
+	KernelSize  int // size of convolution kernel (square)
+	Stride      int // stride for convolution
+	Padding     int // zero-padding size
 
-	weight  *tensor.Dense
-	bias    *tensor.Dense
-	dweight *tensor.Dense
-	dbias   *tensor.Dense
-	input   *tensor.Dense
+	weight  *tensor.Dense // learnable convolution filters
+	bias    *tensor.Dense // learnable bias per output channel
+	dweight *tensor.Dense // weight gradients
+	dbias   *tensor.Dense // bias gradients
+	input   *tensor.Dense // cached input for backward pass
 }
 
+// NewConv2D creates a new 2D convolution layer with Xavier initialization
 func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int) *Conv2D {
 	fanIn := inChannels * kernelSize * kernelSize
 	fanOut := outChannels * kernelSize * kernelSize
@@ -60,6 +62,7 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int) *Conv2D
 	}
 }
 
+// Forward performs 2D convolution with optional padding
 func (c *Conv2D) Forward(input *tensor.Dense) *tensor.Dense {
 	c.input = input.Clone().(*tensor.Dense)
 
@@ -99,7 +102,6 @@ func (c *Conv2D) Forward(input *tensor.Dense) *tensor.Dense {
 	paddedHeight := paddedShape[2]
 	paddedWidth := paddedShape[3]
 
-	// Partition output data per batch to avoid race conditions
 	batchOutputs := make([][]float64, batchSize)
 	outChannelSize := outputHeight * outputWidth
 	batchOutChannelSize := c.OutChannels * outChannelSize
@@ -164,6 +166,7 @@ func (c *Conv2D) Forward(input *tensor.Dense) *tensor.Dense {
 	)
 }
 
+// Backward computes gradients for filters, biases, and input using convolution
 func (c *Conv2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	inputShape := c.input.Shape()
 	batchSize := inputShape[0]
@@ -175,7 +178,6 @@ func (c *Conv2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	outputHeight := gradOutputShape[2]
 	outputWidth := gradOutputShape[3]
 
-	// Reset gradients
 	dweightData := c.dweight.Data().([]float64)
 	for i := range dweightData {
 		dweightData[i] = 0
@@ -199,7 +201,6 @@ func (c *Conv2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	paddedHeight := inputHeight + 2*c.Padding
 	paddedWidth := inputWidth + 2*c.Padding
 
-	// Partition gradients per batch to avoid race conditions
 	batchDWeights := make([][]float64, batchSize)
 	batchDBiases := make([][]float64, batchSize)
 	batchInputGrads := make([][]float64, batchSize)
@@ -227,7 +228,6 @@ func (c *Conv2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 			inputBatchOffset := b * batchInChannelSize
 			gradOutputBatchOffset := b * batchOutChannelSize
 
-			// Calculate weight and bias gradients
 			for oh := 0; oh < outputHeight; oh++ {
 				for ow := 0; ow < outputWidth; ow++ {
 					outPosOffset := oh*outputWidth + ow
@@ -257,7 +257,6 @@ func (c *Conv2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 				}
 			}
 
-			// Calculate input gradients
 			for oh := 0; oh < outputHeight; oh++ {
 				for ow := 0; ow < outputWidth; ow++ {
 					outPosOffset := oh*outputWidth + ow
@@ -289,7 +288,6 @@ func (c *Conv2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	}
 	wg.Wait()
 
-	// Accumulate gradients from all batches
 	for b := 0; b < batchSize; b++ {
 		for i := range dweightData {
 			dweightData[i] += batchDWeights[b][i]
@@ -299,7 +297,6 @@ func (c *Conv2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 		}
 	}
 
-	// Combine input gradients and remove padding
 	inputGradData := make([]float64, batchSize*inChannels*inputHeight*inputWidth)
 	if c.Padding > 0 {
 		for b := 0; b < batchSize; b++ {
@@ -325,6 +322,7 @@ func (c *Conv2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	)
 }
 
+// padInput adds zero-padding around input tensor
 func (c *Conv2D) padInput(input *tensor.Dense, padding int) *tensor.Dense {
 	inputShape := input.Shape()
 	batchSize := inputShape[0]
@@ -371,7 +369,6 @@ func (c *Conv2D) padInput(input *tensor.Dense, padding int) *tensor.Dense {
 	)
 }
 
-// Layer interface methods
 func (c *Conv2D) GetWeights() *tensor.Dense   { return c.weight }
 func (c *Conv2D) GetGradients() *tensor.Dense { return c.dweight }
 func (c *Conv2D) UpdateWeights(weightsUpdate *tensor.Dense) {
@@ -381,13 +378,12 @@ func (c *Conv2D) GetBiases() *tensor.Dense              { return c.bias }
 func (c *Conv2D) GetBiasGradients() *tensor.Dense       { return c.dbias }
 func (c *Conv2D) UpdateBiases(biasUpdate *tensor.Dense) { c.bias = biasUpdate.Clone().(*tensor.Dense) }
 
-// Helper methods
 func (c *Conv2D) String() string {
 	return fmt.Sprintf("Conv2D(in_channels=%d, out_channels=%d, kernel_size=%d, stride=%d, padding=%d)",
 		c.InChannels, c.OutChannels, c.KernelSize, c.Stride, c.Padding)
 }
 
-// ResetGradients resets the gradients to zero
+// ResetGradients zeros out accumulated gradients
 func (c *Conv2D) ResetGradients() {
 	dweightData := c.dweight.Data().([]float64)
 	for i := range dweightData {
@@ -400,7 +396,7 @@ func (c *Conv2D) ResetGradients() {
 	}
 }
 
-// ClearCache clears cached data to prevent memory leaks
+// ClearCache releases cached input to prevent memory leaks
 func (c *Conv2D) ClearCache() {
 	c.input = nil
 }

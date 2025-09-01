@@ -2,8 +2,8 @@ package loss
 
 import "gorgonia.org/tensor"
 
-// Loss interface for all loss functions
+// Loss defines the interface for all loss functions used in training
 type Loss interface {
-	Forward(predictions, targets *tensor.Dense) float64
-	Backward() *tensor.Dense
+	Forward(predictions, targets *tensor.Dense) float64 // computes loss value
+	Backward() *tensor.Dense                            // computes gradients w.r.t predictions
 }

@@ -18,7 +18,7 @@ type DataType int
 const (
 	Classification DataType = iota
 	Regression
-	ImageClassification // Added for image dataset support
+	ImageClassification
 )
 
 type ImageSample struct {
@@ -33,8 +33,8 @@ type DataLoader struct {
 	Seed              int64
 	SplitRatio        float64
 	BatchSize         int
-	Streaming         bool // New field for streaming mode
-	Prefetch          int  // Number of batches to prefetch when streaming
+	Streaming         bool
+	Prefetch          int
 	Features          *tensor.Dense
 	Targets           *tensor.Dense
 	ClassNames        []string
@@ -329,7 +329,7 @@ func (dl *DataLoader) GetBatches(features *tensor.Dense, targets *tensor.Dense, 
 type BatchIterator interface {
 	HasNext() bool
 	Next() *Batch
-	Close() // Add Close method to clean up resources
+	Close() // Close method to clean up resources
 }
 
 // StreamingIterator implements BatchIterator for memory-efficient streaming

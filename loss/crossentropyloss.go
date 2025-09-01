@@ -6,26 +6,28 @@ import (
 	"gorgonia.org/tensor"
 )
 
+// CrossEntropyLoss implements cross-entropy loss for multi-class classification
 type CrossEntropyLoss struct {
-	Predictions *tensor.Dense
-	Targets     *tensor.Dense
+	Predictions *tensor.Dense // cached predictions for gradient computation
+	Targets     *tensor.Dense // cached targets (one-hot encoded)
 }
 
+// NewCrossEntropyLoss creates a new cross-entropy loss function
 func NewCrossEntropyLoss() *CrossEntropyLoss {
 	return &CrossEntropyLoss{}
 }
 
+// Forward computes cross-entropy loss: -mean(sum(target * log(prediction)))
 func (l *CrossEntropyLoss) Forward(predictions, targets *tensor.Dense) float64 {
 	l.Predictions = predictions
 	l.Targets = targets
 
-	// Calculate cross-entropy loss: -sum(target * log(prediction))
 	predData := predictions.Data().([]float64)
 	targetData := targets.Data().([]float64)
 
 	loss := 0.0
 	for i := range predData {
-		loss -= targetData[i] * math.Log(predData[i]+1e-9)
+		loss -= targetData[i] * math.Log(predData[i]+1e-9) // add epsilon for numerical stability
 	}
 
 	shape := predictions.Shape()
@@ -33,9 +35,8 @@ func (l *CrossEntropyLoss) Forward(predictions, targets *tensor.Dense) float64 {
 	return loss / float64(rows)
 }
 
+// Backward computes gradient: (predictions - targets) / batch_size
 func (l *CrossEntropyLoss) Backward() *tensor.Dense {
-	// Gradient of cross-entropy loss with softmax: predictions - targets
-	// This assumes that the last layer is a softmax activation
 	predData := l.Predictions.Data().([]float64)
 	targetData := l.Targets.Data().([]float64)
 

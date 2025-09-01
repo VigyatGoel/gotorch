@@ -2,20 +2,22 @@ package loss
 
 import "gorgonia.org/tensor"
 
+// MSELoss implements Mean Squared Error loss for regression tasks
 type MSELoss struct {
-	Predictions *tensor.Dense
-	Targets     *tensor.Dense
+	Predictions *tensor.Dense // cached predictions for gradient computation
+	Targets     *tensor.Dense // cached target values
 }
 
+// NewMSELoss creates a new mean squared error loss function
 func NewMSELoss() *MSELoss {
 	return &MSELoss{}
 }
 
+// Forward computes MSE loss: mean((predictions - targets)^2)
 func (l *MSELoss) Forward(predictions, targets *tensor.Dense) float64 {
 	l.Predictions = predictions
 	l.Targets = targets
 
-	// Calculate MSE: mean((predictions - targets)^2)
 	predData := predictions.Data().([]float64)
 	targetData := targets.Data().([]float64)
 
@@ -25,13 +27,12 @@ func (l *MSELoss) Forward(predictions, targets *tensor.Dense) float64 {
 		sum += diff * diff
 	}
 
-	// PyTorch averages over all elements, not just the first dimension
 	totalElements := len(predData)
 	return sum / float64(totalElements)
 }
 
+// Backward computes gradient: 2 * (predictions - targets) / total_elements
 func (l *MSELoss) Backward() *tensor.Dense {
-	// Gradient of MSE: 2 * (predictions - targets) / totalElements
 	predData := l.Predictions.Data().([]float64)
 	targetData := l.Targets.Data().([]float64)
 
@@ -41,7 +42,6 @@ func (l *MSELoss) Backward() *tensor.Dense {
 	}
 
 	shape := l.Predictions.Shape()
-	// PyTorch divides by total number of elements, not just the first dimension
 	totalElements := len(gradData)
 	for i := range gradData {
 		gradData[i] /= float64(totalElements)

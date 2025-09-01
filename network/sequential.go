@@ -72,14 +72,27 @@ func (s *Sequential) Predict(input *tensor.Dense) *tensor.Dense {
 	return s.Forward(input)
 }
 
-// ClearCache clears cached data from all layers to prevent memory leaks
+func (s *Sequential) Train() {
+	for _, l := range s.Layers {
+		if dropout, ok := l.(*layer.Dropout); ok {
+			dropout.SetTraining(true)
+		}
+	}
+}
+
+func (s *Sequential) Eval() {
+	for _, l := range s.Layers {
+		if dropout, ok := l.(*layer.Dropout); ok {
+			dropout.SetTraining(false)
+		}
+	}
+}
+
 func (s *Sequential) ClearCache() {
 	for _, l := range s.Layers {
-		// Try to call ClearCache if the layer has it
 		if clearable, ok := l.(interface{ ClearCache() }); ok {
 			clearable.ClearCache()
 		}
-		// For layers that store input data, explicitly clear it
 		if conv, ok := l.(*layer.Conv2D); ok {
 			conv.ClearCache()
 		} else if maxpool, ok := l.(*layer.MaxPool2D); ok {
@@ -90,6 +103,8 @@ func (s *Sequential) ClearCache() {
 			relu.ClearCache()
 		} else if softmax, ok := l.(*layer.Softmax); ok {
 			softmax.ClearCache()
+		} else if dropout, ok := l.(*layer.Dropout); ok {
+			dropout.ClearCache()
 		}
 	}
 }

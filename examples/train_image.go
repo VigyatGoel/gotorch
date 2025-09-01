@@ -6,7 +6,7 @@ package main
 // 	"time"
 
 // 	"github.com/VigyatGoel/gotorch/data"
-// 	layer "github.com/VigyatGoel/gotorch/layers"
+// 	"github.com/VigyatGoel/gotorch/layer"
 // 	"github.com/VigyatGoel/gotorch/loss"
 // 	"github.com/VigyatGoel/gotorch/network"
 // 	"github.com/VigyatGoel/gotorch/optimizer"

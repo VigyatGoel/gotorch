@@ -2,15 +2,22 @@ package layer
 
 import "gorgonia.org/tensor"
 
+// Layer defines the interface that all neural network layers must implement
 type Layer interface {
-	Forward(input *tensor.Dense) *tensor.Dense
-	Backward(dout *tensor.Dense) *tensor.Dense
+	// Core forward and backward propagation
+	Forward(input *tensor.Dense) *tensor.Dense // computes layer output
+	Backward(dout *tensor.Dense) *tensor.Dense // computes input gradients
 
-	GetWeights() *tensor.Dense
-	GetGradients() *tensor.Dense
-	UpdateWeights(weightsUpdate *tensor.Dense)
+	// Weight management (returns nil for layers without weights)
+	GetWeights() *tensor.Dense                 // returns current weights
+	GetGradients() *tensor.Dense               // returns weight gradients
+	UpdateWeights(weightsUpdate *tensor.Dense) // updates weights with new values
 
-	GetBiases() *tensor.Dense
-	GetBiasGradients() *tensor.Dense
-	UpdateBiases(biasUpdate *tensor.Dense)
+	// Bias management (returns nil for layers without biases)
+	GetBiases() *tensor.Dense              // returns current biases
+	GetBiasGradients() *tensor.Dense       // returns bias gradients
+	UpdateBiases(biasUpdate *tensor.Dense) // updates biases with new values
+
+	// Memory management
+	ClearCache() // releases cached data to prevent memory leaks
 }

@@ -8,20 +8,22 @@ import (
 	"gorgonia.org/tensor"
 )
 
+// MaxPool2D implements 2D max pooling for downsampling
 type MaxPool2D struct {
-	PoolSize int
-	Stride   int
+	PoolSize int // size of pooling window
+	Stride   int // stride for pooling operation
 
-	input      *tensor.Dense
-	maxIndices [][]int // Partitioned per batch to avoid race conditions
+	input      *tensor.Dense // cached input for backward pass
+	maxIndices [][]int       // indices of max values for gradient routing
 }
 
+// NewMaxPool2D creates a new 2D max pooling layer
 func NewMaxPool2D(poolSize, stride int) *MaxPool2D {
 	if poolSize <= 0 {
 		panic("poolSize must be greater than 0")
 	}
 	if stride <= 0 {
-		stride = poolSize // Default stride equals pool size
+		stride = poolSize
 	}
 	return &MaxPool2D{
 		PoolSize: poolSize,
@@ -29,6 +31,7 @@ func NewMaxPool2D(poolSize, stride int) *MaxPool2D {
 	}
 }
 
+// Forward performs 2D max pooling and records max indices
 func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
 	m.input = input.Clone().(*tensor.Dense)
 
@@ -49,13 +52,11 @@ func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
 		panic(fmt.Sprintf("Invalid output dimensions: %dx%d", outputHeight, outputWidth))
 	}
 
-	// Safe type assertion with error handling
 	inputData, ok := input.Data().([]float64)
 	if !ok {
 		panic("Input tensor data must be []float64")
 	}
 
-	// Partition output data and max indices per batch to avoid race conditions
 	batchOutputs := make([][]float64, batchSize)
 	batchMaxIndices := make([][]int, batchSize)
 	outChannelSize := outputHeight * outputWidth
@@ -85,7 +86,6 @@ func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
 						maxVal := math.Inf(-1)
 						maxIdx := -1
 
-						// Find max in pool window
 						for ph := 0; ph < m.PoolSize; ph++ {
 							for pw := 0; pw < m.PoolSize; pw++ {
 								h := startH + ph
@@ -111,7 +111,6 @@ func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
 	}
 	wg.Wait()
 
-	// Combine batch outputs and max indices
 	outputData := make([]float64, batchSize*batchOutChannelSize)
 	m.maxIndices = make([][]int, batchSize)
 
@@ -126,6 +125,7 @@ func (m *MaxPool2D) Forward(input *tensor.Dense) *tensor.Dense {
 	)
 }
 
+// Backward routes gradients back to max positions using cached indices
 func (m *MaxPool2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	inputShape := m.input.Shape()
 	batchSize := inputShape[0]
@@ -137,13 +137,11 @@ func (m *MaxPool2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	outputHeight := outputShape[2]
 	outputWidth := outputShape[3]
 
-	// Safe type assertion with error handling
 	gradOutputData, ok := gradOutput.Data().([]float64)
 	if !ok {
 		panic("GradOutput tensor data must be []float64")
 	}
 
-	// Partition input gradients per batch to avoid race conditions
 	batchInputGrads := make([][]float64, batchSize)
 	inChannelSize := height * width
 	batchInChannelSize := channels * inChannelSize
@@ -171,7 +169,6 @@ func (m *MaxPool2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 
 						maxIdx := m.maxIndices[b][outputIdx]
 						if maxIdx >= 0 {
-							// Convert global index to batch-local index
 							localMaxIdx := maxIdx - b*batchInChannelSize
 							if localMaxIdx >= 0 && localMaxIdx < batchInChannelSize {
 								batchInputGrads[b][localMaxIdx] += gradOutputData[gradOutputIdx]
@@ -184,7 +181,6 @@ func (m *MaxPool2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	}
 	wg.Wait()
 
-	// Combine input gradients from all batches
 	inputGradData := make([]float64, batchSize*batchInChannelSize)
 	for b := 0; b < batchSize; b++ {
 		copy(inputGradData[b*batchInChannelSize:(b+1)*batchInChannelSize], batchInputGrads[b])
@@ -196,7 +192,6 @@ func (m *MaxPool2D) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 	)
 }
 
-// Layer interface methods
 func (m *MaxPool2D) GetWeights() *tensor.Dense                 { return nil }
 func (m *MaxPool2D) GetGradients() *tensor.Dense               { return nil }
 func (m *MaxPool2D) UpdateWeights(weightsUpdate *tensor.Dense) {}
@@ -208,7 +203,7 @@ func (m *MaxPool2D) String() string {
 	return fmt.Sprintf("MaxPool2D(pool_size=%d, stride=%d)", m.PoolSize, m.Stride)
 }
 
-// ClearCache clears cached data to prevent memory leaks
+// ClearCache releases cached data to prevent memory leaks
 func (m *MaxPool2D) ClearCache() {
 	m.input = nil
 	m.maxIndices = nil

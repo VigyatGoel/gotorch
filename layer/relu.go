@@ -4,17 +4,19 @@ import (
 	"gorgonia.org/tensor"
 )
 
+// ReLU implements Rectified Linear Unit activation: f(x) = max(0, x)
 type ReLU struct {
-	input *tensor.Dense
+	input *tensor.Dense // cached input for gradient computation
 }
 
+// NewReLU creates a new ReLU activation layer
 func NewReLU() *ReLU {
 	return &ReLU{}
 }
 
+// Forward applies ReLU activation element-wise
 func (r *ReLU) Forward(x *tensor.Dense) *tensor.Dense {
 	r.input = x
-	// Apply ReLU: max(0, x)
 	result := x.Clone().(*tensor.Dense)
 	data := result.Data().([]float64)
 	for i, v := range data {
@@ -25,8 +27,8 @@ func (r *ReLU) Forward(x *tensor.Dense) *tensor.Dense {
 	return result
 }
 
+// Backward computes ReLU gradient: 1 if input > 0, else 0
 func (r *ReLU) Backward(gradOutput *tensor.Dense) *tensor.Dense {
-	// Gradient of ReLU: 1 if x > 0, 0 otherwise
 	grad := r.input.Clone().(*tensor.Dense)
 	inputData := grad.Data().([]float64)
 	for i, v := range inputData {
@@ -37,7 +39,6 @@ func (r *ReLU) Backward(gradOutput *tensor.Dense) *tensor.Dense {
 		}
 	}
 
-	// Element-wise multiplication with gradOutput
 	result, _ := tensor.Mul(grad, gradOutput)
 	return result.(*tensor.Dense)
 }
@@ -49,7 +50,7 @@ func (r *ReLU) GetBiases() *tensor.Dense                  { return nil }
 func (r *ReLU) GetBiasGradients() *tensor.Dense           { return nil }
 func (r *ReLU) UpdateBiases(biasUpdate *tensor.Dense)     {}
 
-// ClearCache clears cached data to prevent memory leaks
+// ClearCache releases cached input to prevent memory leaks
 func (r *ReLU) ClearCache() {
 	r.input = nil
 }
