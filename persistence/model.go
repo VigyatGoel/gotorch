@@ -46,6 +46,8 @@ type LayerConfig struct {
 	Biases      []float64 `json:"biases,omitempty"`
 	BiasShape   []int     `json:"bias_shape,omitempty"`
 	Alpha       float64   `json:"alpha,omitempty"`
+	// For Dropout
+	DropoutRate float64   `json:"dropout_rate,omitempty"`
 	// For Conv2D
 	InChannels  int `json:"in_channels,omitempty"`
 	OutChannels int `json:"out_channels,omitempty"`
@@ -121,6 +123,8 @@ func SaveModel(model ModelInterface, filePath string) error {
 			layerConfig.Stride = typedLayer.Stride
 		case *layer.LeakyReLU:
 			layerConfig.Alpha = typedLayer.Alpha
+		case *layer.Dropout:
+			layerConfig.DropoutRate = typedLayer.DropoutRate
 		case *layer.ReLU, *layer.Sigmoid, *layer.Softmax, *layer.SiLU, *layer.Flatten:
 			// No parameters to save
 		}
@@ -209,6 +213,8 @@ func LoadModelData(filePath string) (*ModelData, error) {
 			newLayer = layer.NewSoftmax()
 		case "SiLU":
 			newLayer = layer.NewSiLU()
+		case "Dropout":
+			newLayer = layer.NewDropout(layerConfig.DropoutRate)
 		default:
 			return nil, fmt.Errorf("unsupported layer type: %s", layerConfig.Type)
 		}
