@@ -28,6 +28,7 @@ GoTorch is a deep learning framework implemented in pure Go, designed for simpli
   - Convolutional layers (Conv2D)
   - Pooling layers (MaxPool2D)
   - Flatten layer for reshaping
+  - Dropout layer for regularization
   - Activation functions (ReLU, Leaky ReLU, Sigmoid, Softmax, SiLU/Swish)
   - Loss functions (Cross-Entropy, MSE)
   - Optimizers: SGD (with momentum) and Adam
@@ -110,6 +111,7 @@ GoTorch's architecture consists of the following key components:
 - **Conv2d**: 2D convolutional layer for image processing
 - **MaxPool2d**: 2D max pooling layer for downsampling
 - **Flatten**: Flattens multi-dimensional input to 1D
+- **Dropout**: Regularization layer that randomly sets input units to 0
 - **ReLU**: Rectified Linear Unit activation function
 - **LeakyReLU**: Leaky ReLU activation function with customizable negative slope
 - **Sigmoid**: Sigmoid activation function
@@ -243,7 +245,7 @@ GoTorch is under active development, with plans to incorporate the following fea
 
 - **Extended Functionality**:
   - Additional optimization algorithms (AdamW, RMSProp)
-  - Regularization techniques (Dropout, L1/L2 regularization)
+  - Regularization techniques (L1/L2 regularization)
   - Learning rate schedulers
   - Early stopping and model checkpointing
 
