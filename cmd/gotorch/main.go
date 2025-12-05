@@ -57,12 +57,10 @@ func showHelp() {
 	fmt.Println("")
 	fmt.Println("EXAMPLES:")
 	fmt.Println("  gotorch run train_minimal.go")
-	fmt.Println("  gotorch run examples/train_cnn.go")
 	fmt.Println("  gotorch run my_model.go --epochs 100")
 }
 
 func runGoFile(filename string, args []string) {
-	// Check if file exists
 	if !strings.HasSuffix(filename, ".go") {
 		fmt.Printf("⚠️  Warning: '%s' doesn't have .go extension\n", filename)
 	}
@@ -72,20 +70,17 @@ func runGoFile(filename string, args []string) {
 		os.Exit(1)
 	}
 
-	// Show what we're running
 	fmt.Printf("🚀 Running: %s\n", filepath.Base(filename))
 	if len(args) > 0 {
 		fmt.Printf("📝 Args: %s\n", strings.Join(args, " "))
 	}
 	fmt.Println(strings.Repeat("-", 50))
 
-	// Set the environment variables
-	env := append(os.Environ(), 
+	env := append(os.Environ(),
 		fmt.Sprintf("%s=%s", envVarName1, envVarValue1),
 		fmt.Sprintf("%s=%s", envVarName2, envVarValue2),
 	)
 
-	// Prepare the command
 	cmdArgs := append([]string{"run", filename}, args...)
 	cmd := exec.Command("go", cmdArgs...)
 	cmd.Env = env
@@ -93,7 +88,6 @@ func runGoFile(filename string, args []string) {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 
-	// Run the command
 	if err := cmd.Run(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			fmt.Printf("\n❌ Program exited with code %d\n", exitError.ExitCode())

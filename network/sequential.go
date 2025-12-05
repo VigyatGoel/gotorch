@@ -93,11 +93,7 @@ func (s *Sequential) ClearCache() {
 		if clearable, ok := l.(interface{ ClearCache() }); ok {
 			clearable.ClearCache()
 		}
-		if conv, ok := l.(*layer.Conv2D); ok {
-			conv.ClearCache()
-		} else if maxpool, ok := l.(*layer.MaxPool2D); ok {
-			maxpool.ClearCache()
-		} else if flatten, ok := l.(*layer.Flatten); ok {
+		if flatten, ok := l.(*layer.Flatten); ok {
 			flatten.ClearCache()
 		} else if relu, ok := l.(*layer.ReLU); ok {
 			relu.ClearCache()

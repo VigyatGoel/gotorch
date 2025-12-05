@@ -3,7 +3,6 @@ package data
 import (
 	"encoding/csv"
 	"fmt"
-	"io"
 	"math"
 	"math/rand"
 	"os"
@@ -18,34 +17,19 @@ type DataType int
 const (
 	Classification DataType = iota
 	Regression
-	ImageClassification
 )
 
-type ImageSample struct {
-	Path     string
-	ClassIdx int
-}
-
 type DataLoader struct {
-	FilePath          string
-	DataType          DataType
-	Shuffle           bool
-	Seed              int64
-	SplitRatio        float64
-	BatchSize         int
-	Streaming         bool
-	Prefetch          int
-	Features          *tensor.Dense
-	Targets           *tensor.Dense
-	ClassNames        []string
-	ColumnNames       []string
-	ImageDir          string
-	ImageSamples      []ImageSample
-	ImageWidth        int
-	ImageHeight       int
-	Grayscale         bool
-	trainImageSamples []ImageSample
-	testImageSamples  []ImageSample
+	FilePath    string
+	DataType    DataType
+	Shuffle     bool
+	Seed        int64
+	SplitRatio  float64
+	BatchSize   int
+	Features    *tensor.Dense
+	Targets     *tensor.Dense
+	ClassNames  []string
+	ColumnNames []string
 }
 
 type Batch struct {
@@ -53,7 +37,7 @@ type Batch struct {
 	Targets  *tensor.Dense
 }
 
-func NewDataLoader(filePath string, dataType DataType, batchSize int, streaming bool) *DataLoader {
+func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoader {
 	return &DataLoader{
 		FilePath:   filePath,
 		DataType:   dataType,
@@ -61,72 +45,11 @@ func NewDataLoader(filePath string, dataType DataType, batchSize int, streaming 
 		Seed:       42,
 		SplitRatio: 0.8,
 		BatchSize:  batchSize,
-		Streaming:  streaming,
 		ClassNames: []string{},
-		Grayscale:  true, // Default to grayscale
 	}
 }
 
 func (dl *DataLoader) Load() error {
-	if dl.DataType == ImageClassification {
-		if dl.ImageDir == "" {
-			return fmt.Errorf("ImageDir must be set for ImageClassification")
-		}
-		if len(dl.ClassNames) == 0 {
-			classNames, err := GetClassNamesFromDir(dl.ImageDir)
-			if err != nil {
-				return fmt.Errorf("failed to get class names: %w", err)
-			}
-			dl.ClassNames = classNames
-		}
-
-		if dl.Streaming {
-			// For streaming mode, just load paths without loading actual images
-			samples, err := LoadImagePathsAndLabels(dl.ImageDir, dl.ClassNames)
-			if err != nil {
-				return fmt.Errorf("failed to load image paths: %w", err)
-			}
-			dl.ImageSamples = samples
-
-			// Split samples for streaming
-			if dl.Shuffle {
-				r := rand.New(rand.NewSource(dl.Seed))
-				r.Shuffle(len(dl.ImageSamples), func(i, j int) {
-					dl.ImageSamples[i], dl.ImageSamples[j] = dl.ImageSamples[j], dl.ImageSamples[i]
-				})
-			}
-			total := len(dl.ImageSamples)
-			splitIndex := int(float64(total) * dl.SplitRatio)
-			dl.trainImageSamples = dl.ImageSamples[:splitIndex]
-			dl.testImageSamples = dl.ImageSamples[splitIndex:]
-			return nil
-		}
-
-		// Non-streaming mode: load all images into memory
-		samples, err := LoadImagePathsAndLabels(dl.ImageDir, dl.ClassNames)
-		if err != nil {
-			return fmt.Errorf("failed to load image paths: %w", err)
-		}
-		dl.ImageSamples = samples
-		if dl.Shuffle {
-			r := rand.New(rand.NewSource(dl.Seed))
-			r.Shuffle(len(dl.ImageSamples), func(i, j int) {
-				dl.ImageSamples[i], dl.ImageSamples[j] = dl.ImageSamples[j], dl.ImageSamples[i]
-			})
-		}
-		if dl.SplitRatio <= 0 || dl.SplitRatio >= 1 {
-			dl.SplitRatio = 0.8
-		}
-
-		// Split the samples
-		total := len(dl.ImageSamples)
-		splitIndex := int(float64(total) * dl.SplitRatio)
-		dl.trainImageSamples = dl.ImageSamples[:splitIndex]
-		dl.testImageSamples = dl.ImageSamples[splitIndex:]
-
-		return nil
-	}
-
 	file, err := os.Open(dl.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
@@ -134,44 +57,34 @@ func (dl *DataLoader) Load() error {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-
-	header, err := reader.Read()
+	records, err := reader.ReadAll()
 	if err != nil {
-		return fmt.Errorf("error reading header: %w", err)
+		return fmt.Errorf("error reading records: %w", err)
 	}
-	dl.ColumnNames = header
-
-	var records [][]string
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("error reading record: %w", err)
-		}
-		records = append(records, record)
-	}
-
-	if len(records) == 0 {
+	if len(records) < 2 {
 		return fmt.Errorf("no data found")
 	}
 
-	cols := len(records[0])
-	rows := len(records)
-	featuresData := make([]float64, rows*(cols-1))
-	targetsData := make([]float64, rows)
+	dl.ColumnNames = records[0]
+	records = records[1:]
 
+	rows := len(records)
+	cols := len(records[0])
+	featuresData := make([]float64, rows*(cols-1))
+
+	// Parse features
 	for i, record := range records {
 		for j := 0; j < cols-1; j++ {
 			val, err := strconv.ParseFloat(strings.TrimSpace(record[j]), 64)
 			if err != nil {
-				return fmt.Errorf("invalid float at row %d col %d value '%s': %w", i, j, record[j], err)
+				return fmt.Errorf("invalid float at row %d col %d: %w", i, j, err)
 			}
 			featuresData[i*(cols-1)+j] = val
 		}
 	}
+	dl.Features = tensor.New(tensor.WithShape(rows, cols-1), tensor.WithBacking(featuresData))
 
+	// Parse targets
 	if dl.DataType == Classification {
 		classMap := make(map[string]int)
 		for _, record := range records {
@@ -182,32 +95,26 @@ func (dl *DataLoader) Load() error {
 			}
 		}
 
-		targetsData = make([]float64, rows*len(dl.ClassNames))
+		targetsData := make([]float64, rows*len(dl.ClassNames))
 		for i, record := range records {
 			label := strings.TrimSpace(record[cols-1])
-			classIndex := classMap[label]
-			targetsData[i*len(dl.ClassNames)+classIndex] = 1.0
+			targetsData[i*len(dl.ClassNames)+classMap[label]] = 1.0
 		}
 		dl.Targets = tensor.New(tensor.WithShape(rows, len(dl.ClassNames)), tensor.WithBacking(targetsData))
 	} else {
+		targetsData := make([]float64, rows)
 		for i, record := range records {
 			val, err := strconv.ParseFloat(strings.TrimSpace(record[cols-1]), 64)
 			if err != nil {
-				return fmt.Errorf("invalid target at row %d value '%s': %w", i, record[cols-1], err)
+				return fmt.Errorf("invalid target at row %d: %w", i, err)
 			}
 			targetsData[i] = val
 		}
 		dl.Targets = tensor.New(tensor.WithShape(rows, 1), tensor.WithBacking(targetsData))
 	}
 
-	dl.Features = tensor.New(tensor.WithShape(rows, cols-1), tensor.WithBacking(featuresData))
-
 	if dl.Shuffle {
 		dl.shuffle()
-	}
-
-	if dl.SplitRatio <= 0 || dl.SplitRatio >= 1 {
-		dl.SplitRatio = 0.8
 	}
 
 	return nil
@@ -325,482 +232,38 @@ func (dl *DataLoader) GetBatches(features *tensor.Dense, targets *tensor.Dense, 
 	return batches
 }
 
-// BatchIterator interface for streaming
-type BatchIterator interface {
-	HasNext() bool
-	Next() *Batch
-	Close() // Close method to clean up resources
-}
-
-// StreamingIterator implements BatchIterator for memory-efficient streaming
-type StreamingIterator struct {
-	samples    []ImageSample
-	indices    []int
-	batchSize  int
-	current    int
-	dl         *DataLoader
-	prefetchCh chan *Batch
-	done       chan bool
-	closed     bool
-}
-
-func (iter *StreamingIterator) HasNext() bool {
-	return iter.current < len(iter.samples) && !iter.closed
-}
-
-func (iter *StreamingIterator) Next() *Batch {
-	if iter.closed {
-		return nil
-	}
-
-	if iter.prefetchCh != nil {
-		select {
-		case batch := <-iter.prefetchCh:
-			return batch
-		default:
-			// Fallback to synchronous loading if prefetch buffer is empty
-			return iter.loadBatch()
-		}
-	}
-
-	return iter.loadBatch()
-}
-
-func (iter *StreamingIterator) Close() {
-	if iter.closed {
-		return
-	}
-	iter.closed = true
-
-	if iter.done != nil {
-		close(iter.done)
-	}
-
-	// Clear channels to help with garbage collection
-	iter.prefetchCh = nil
-	iter.done = nil
-}
-
-func (iter *StreamingIterator) loadBatch() *Batch {
-	end := iter.current + iter.batchSize
-	if end > len(iter.samples) {
-		end = len(iter.samples)
-	}
-
-	var features []*tensor.Dense
-	labels := make([][]float64, 0, end-iter.current)
-
-	for _, idx := range iter.indices[iter.current:end] {
-		sample := iter.samples[idx]
-		var imgMat *tensor.Dense
-		var err error
-
-		if iter.dl.Grayscale {
-			imgMat, err = LoadImageGrayscale(sample.Path, iter.dl.ImageWidth, iter.dl.ImageHeight)
-		} else {
-			imgMat, err = LoadImageRGB(sample.Path, iter.dl.ImageWidth, iter.dl.ImageHeight)
-		}
-
-		if err != nil {
-			continue
-		}
-
-		features = append(features, imgMat)
-		label := make([]float64, len(iter.dl.ClassNames))
-		label[sample.ClassIdx] = 1.0
-		labels = append(labels, label)
-	}
-
-	iter.current = end
-
-	if len(features) == 0 {
-		return iter.loadBatch()
-	}
-
-	imgShape := features[0].Shape()
-	channels := imgShape[1]
-	height := imgShape[2]
-	width := imgShape[3]
-	currentBatchSize := len(features)
-
-	featuresData := make([]float64, 0, currentBatchSize*channels*height*width)
-	for _, f := range features {
-		featuresData = append(featuresData, f.Data().([]float64)...)
-	}
-
-	batchFeatures := tensor.New(
-		tensor.WithShape(currentBatchSize, channels, height, width),
-		tensor.WithBacking(featuresData),
-	)
-
-	labelsData := make([]float64, 0, len(labels)*len(iter.dl.ClassNames))
-	for _, l := range labels {
-		labelsData = append(labelsData, l...)
-	}
-	batchTargets := tensor.New(tensor.WithShape(len(labels), len(iter.dl.ClassNames)), tensor.WithBacking(labelsData))
-
-	return &Batch{Features: batchFeatures, Targets: batchTargets}
-}
-
-func (iter *StreamingIterator) startPrefetching() {
-	if iter.dl.Prefetch <= 0 || iter.closed {
-		return
-	}
-
-	iter.prefetchCh = make(chan *Batch, iter.dl.Prefetch)
-	iter.done = make(chan bool)
-
-	go func() {
-		defer close(iter.prefetchCh)
-		for iter.current < len(iter.samples) && !iter.closed {
-			select {
-			case <-iter.done:
-				return
-			default:
-				batch := iter.loadBatch()
-				if batch != nil && !iter.closed {
-					select {
-					case iter.prefetchCh <- batch:
-					case <-iter.done:
-						return
-					}
-				}
-			}
-		}
-	}()
-}
-
-// BatchSliceIterator wraps []Batch to implement BatchIterator
-type BatchSliceIterator struct {
-	batches []Batch
-	current int
-}
-
-func (iter *BatchSliceIterator) HasNext() bool {
-	return iter.current < len(iter.batches)
-}
-
-func (iter *BatchSliceIterator) Next() *Batch {
-	if !iter.HasNext() {
-		return nil
-	}
-	batch := &iter.batches[iter.current]
-	iter.current++
-	return batch
-}
-
-func (iter *BatchSliceIterator) Close() {
-	// No resources to clean up for slice iterator
-}
-
-func (dl *DataLoader) GetTrainImageBatches(epoch int, batchSize int) []Batch {
-	if dl.Streaming {
-		return dl.getStreamingImageBatches(dl.trainImageSamples, epoch, batchSize)
-	}
-	return dl.getImageBatches(dl.trainImageSamples, epoch, batchSize)
-}
-
-func (dl *DataLoader) GetTestIterator(batchSize int) BatchIterator {
-	if dl.Streaming {
-		total := len(dl.testImageSamples)
-		indices := make([]int, total)
-		for i := 0; i < total; i++ {
-			indices[i] = i
-		}
-
-		iter := &StreamingIterator{
-			samples:   dl.testImageSamples,
-			indices:   indices,
-			batchSize: batchSize,
-			current:   0,
-			dl:        dl,
-		}
-		iter.startPrefetching()
-		return iter
-	} else {
-		batches := dl.getImageBatches(dl.testImageSamples, 0, batchSize)
-		return &BatchSliceIterator{
-			batches: batches,
-			current: 0,
-		}
-	}
-}
-
-func (dl *DataLoader) GetTestImageBatches(batchSize int) []Batch {
-	if dl.Streaming {
-		return dl.getStreamingImageBatches(dl.testImageSamples, 0, batchSize)
-	}
-	return dl.getImageBatches(dl.testImageSamples, 0, batchSize)
-}
-
-// GetTrainIterator returns iterator that works for both streaming and non-streaming
-func (dl *DataLoader) GetTrainIterator(epoch int, batchSize int) BatchIterator {
-	if dl.Streaming {
-		// Return true streaming iterator
-		total := len(dl.trainImageSamples)
-		indices := make([]int, total)
-		for i := 0; i < total; i++ {
-			indices[i] = i
-		}
-
-		if dl.Shuffle {
-			epochSeed := dl.Seed + int64(epoch)
-			r := rand.New(rand.NewSource(epochSeed))
-			r.Shuffle(total, func(i, j int) {
-				indices[i], indices[j] = indices[j], indices[i]
-			})
-		}
-
-		iter := &StreamingIterator{
-			samples:   dl.trainImageSamples,
-			indices:   indices,
-			batchSize: batchSize,
-			current:   0,
-			dl:        dl,
-		}
-		iter.startPrefetching()
-		return iter
-	} else {
-		// Return iterator over pre-loaded batches
-		batches := dl.getImageBatches(dl.trainImageSamples, epoch, batchSize)
-		return &BatchSliceIterator{
-			batches: batches,
-			current: 0,
-		}
-	}
-}
-
-func (dl *DataLoader) getStreamingImageBatches(samples []ImageSample, epoch int, batchSize int) []Batch {
-	// For backward compatibility - streaming should use GetTrainIterator instead
-	return dl.getImageBatches(samples, epoch, batchSize)
-}
-
-func (dl *DataLoader) getImageBatches(samples []ImageSample, epoch int, batchSize int) []Batch {
-	total := len(samples)
-	indices := make([]int, total)
-	for i := 0; i < total; i++ {
-		indices[i] = i
-	}
-	if dl.Shuffle {
-		epochSeed := dl.Seed + int64(epoch)
-		r := rand.New(rand.NewSource(epochSeed))
-		r.Shuffle(total, func(i, j int) {
-			indices[i], indices[j] = indices[j], indices[i]
-		})
-	}
-	numBatches := int(math.Ceil(float64(total) / float64(batchSize)))
-	batches := make([]Batch, 0, numBatches)
-	for i := 0; i < total; i += batchSize {
-		end := i + batchSize
-		if end > total {
-			end = total
-		}
-		var features []*tensor.Dense
-		labels := make([][]float64, 0, end-i)
-		for _, idx := range indices[i:end] {
-			sample := samples[idx]
-			var imgMat *tensor.Dense
-			var err error
-			if dl.Grayscale {
-				imgMat, err = LoadImageGrayscale(sample.Path, dl.ImageWidth, dl.ImageHeight)
-			} else {
-				imgMat, err = LoadImageRGB(sample.Path, dl.ImageWidth, dl.ImageHeight)
-			}
-			if err != nil {
-				continue
-			}
-			features = append(features, imgMat)
-			label := make([]float64, len(dl.ClassNames))
-			label[sample.ClassIdx] = 1.0
-			labels = append(labels, label)
-		}
-		if len(features) == 0 {
-			continue
-		}
-
-		imgShape := features[0].Shape()
-		channels := imgShape[1]
-		height := imgShape[2]
-		width := imgShape[3]
-		currentBatchSize := len(features)
-
-		featuresData := make([]float64, 0, currentBatchSize*channels*height*width)
-		for _, f := range features {
-			featuresData = append(featuresData, f.Data().([]float64)...)
-		}
-
-		batchFeatures := tensor.New(
-			tensor.WithShape(currentBatchSize, channels, height, width),
-			tensor.WithBacking(featuresData),
-		)
-
-		labelsData := make([]float64, 0, len(labels)*len(dl.ClassNames))
-		for _, l := range labels {
-			labelsData = append(labelsData, l...)
-		}
-		batchTargets := tensor.New(tensor.WithShape(len(labels), len(dl.ClassNames)), tensor.WithBacking(labelsData))
-
-		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
-	}
-	return batches
-}
-
-func (dl *DataLoader) NumFeatures() int {
-	shape := dl.Features.Shape()
-	if len(shape) < 2 {
-		if len(dl.ColumnNames) > 1 {
-			return len(dl.ColumnNames) - 1
-		}
-		return 0
-	}
-	return shape[1]
-}
-
-func (dl *DataLoader) Split() (trainX, trainY, testX, testY *tensor.Dense) {
-	shape := dl.Features.Shape()
-	rows := shape[0]
-	if rows == 0 {
-		return nil, nil, nil, nil
-	}
-
-	cols := shape[1]
-	targetShape := dl.Targets.Shape()
-	targetCols := targetShape[1]
-
-	split := int(float64(rows) * dl.SplitRatio)
-	if split <= 0 {
-		split = 1
-	} else if split >= rows {
-		split = rows - 1
-	}
-
-	// Get data slices
-	featureData := dl.Features.Data().([]float64)
-	targetData := dl.Targets.Data().([]float64)
-
-	// Create training data slices
-	trainFeatureData := make([]float64, split*cols)
-	trainTargetData := make([]float64, split*targetCols)
-
-	// Create test data slices
-	testFeatureData := make([]float64, (rows-split)*cols)
-	testTargetData := make([]float64, (rows-split)*targetCols)
-
-	// Copy data
-	for i := 0; i < split; i++ {
-		// Copy features
-		for j := 0; j < cols; j++ {
-			trainFeatureData[i*cols+j] = featureData[i*cols+j]
-		}
-		// Copy targets
-		for j := 0; j < targetCols; j++ {
-			trainTargetData[i*targetCols+j] = targetData[i*targetCols+j]
-		}
-	}
-
-	for i := split; i < rows; i++ {
-		// Copy features
-		for j := 0; j < cols; j++ {
-			testFeatureData[(i-split)*cols+j] = featureData[i*cols+j]
-		}
-		// Copy targets
-		for j := 0; j < targetCols; j++ {
-			testTargetData[(i-split)*targetCols+j] = targetData[i*targetCols+j]
-		}
-	}
-
-	trainX = tensor.New(tensor.WithShape(split, cols), tensor.WithBacking(trainFeatureData))
-	trainY = tensor.New(tensor.WithShape(split, targetCols), tensor.WithBacking(trainTargetData))
-	testX = tensor.New(tensor.WithShape(rows-split, cols), tensor.WithBacking(testFeatureData))
-	testY = tensor.New(tensor.WithShape(rows-split, targetCols), tensor.WithBacking(testTargetData))
-
-	return
-}
-
 // TrainBatches returns a channel for PyTorch-style iteration over training batches
-func (dl *DataLoader) TrainBatches(epoch int) <-chan *Batch {
-	ch := make(chan *Batch)
+func (dl *DataLoader) TrainBatches(epoch int) <-chan Batch {
+	ch := make(chan Batch)
 	go func() {
 		defer close(ch)
-		iter := dl.GetTrainIterator(epoch, dl.BatchSize)
-		defer func() {
-			if closer, ok := iter.(interface{ Close() }); ok {
-				closer.Close()
-			}
-		}()
-
-		for iter.HasNext() {
-			batch := iter.Next()
-			if batch != nil {
-				ch <- batch
-			}
+		trainX, trainY, _, _ := dl.Split()
+		if trainX == nil || trainY == nil {
+			return
+		}
+		batches := dl.GetBatches(trainX, trainY, epoch)
+		for _, batch := range batches {
+			ch <- batch
 		}
 	}()
 	return ch
 }
 
 // TestBatches returns a channel for PyTorch-style iteration over test batches
-func (dl *DataLoader) TestBatches() <-chan *Batch {
-	ch := make(chan *Batch)
+func (dl *DataLoader) TestBatches() <-chan Batch {
+	ch := make(chan Batch)
 	go func() {
 		defer close(ch)
-		iter := dl.GetTestIterator(dl.BatchSize)
-		defer func() {
-			if closer, ok := iter.(interface{ Close() }); ok {
-				closer.Close()
-			}
-		}()
-
-		for iter.HasNext() {
-			batch := iter.Next()
-			if batch != nil {
-				ch <- batch
-			}
+		_, _, testX, testY := dl.Split()
+		if testX == nil || testY == nil {
+			return
+		}
+		batches := dl.GetBatches(testX, testY, 0)
+		for _, batch := range batches {
+			ch <- batch
 		}
 	}()
 	return ch
-}
-
-// ForEachTrainBatch executes the provided function for each training batch
-func (dl *DataLoader) ForEachTrainBatch(epoch int, fn func(batch *Batch) error) error {
-	iter := dl.GetTrainIterator(epoch, dl.BatchSize)
-	defer func() {
-		if closer, ok := iter.(interface{ Close() }); ok {
-			closer.Close()
-		}
-	}()
-
-	for iter.HasNext() {
-		batch := iter.Next()
-		if batch == nil {
-			continue
-		}
-		if err := fn(batch); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ForEachTestBatch executes the provided function for each test batch
-func (dl *DataLoader) ForEachTestBatch(fn func(batch *Batch) error) error {
-	iter := dl.GetTestIterator(dl.BatchSize)
-	defer func() {
-		if closer, ok := iter.(interface{ Close() }); ok {
-			closer.Close()
-		}
-	}()
-
-	for iter.HasNext() {
-		batch := iter.Next()
-		if batch == nil {
-			continue
-		}
-		if err := fn(batch); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (dl *DataLoader) NormalizeFeatures() {
@@ -846,4 +309,64 @@ func (dl *DataLoader) NormalizeFeatures() {
 			featureData[i*cols+j] = (featureData[i*cols+j] - means[j]) / stdDevs[j]
 		}
 	}
+}
+
+func (dl *DataLoader) NumFeatures() int {
+	shape := dl.Features.Shape()
+	if len(shape) < 2 {
+		if len(dl.ColumnNames) > 1 {
+			return len(dl.ColumnNames) - 1
+		}
+		return 0
+	}
+	return shape[1]
+}
+
+func (dl *DataLoader) Split() (trainX, trainY, testX, testY *tensor.Dense) {
+	shape := dl.Features.Shape()
+	rows := shape[0]
+	if rows == 0 {
+		return nil, nil, nil, nil
+	}
+
+	cols := shape[1]
+	targetShape := dl.Targets.Shape()
+	targetCols := targetShape[1]
+
+	split := int(float64(rows) * dl.SplitRatio)
+	if split <= 0 {
+		split = 1
+	} else if split >= rows {
+		split = rows - 1
+	}
+
+	// Get data slices
+	featureData := dl.Features.Data().([]float64)
+	targetData := dl.Targets.Data().([]float64)
+
+	// Create training data slices
+	trainFeatureData := make([]float64, split*cols)
+	trainTargetData := make([]float64, split*targetCols)
+
+	// Create test data slices
+	testFeatureData := make([]float64, (rows-split)*cols)
+	testTargetData := make([]float64, (rows-split)*targetCols)
+
+	// Copy data
+	for i := 0; i < split; i++ {
+		copy(trainFeatureData[i*cols:(i+1)*cols], featureData[i*cols:(i+1)*cols])
+		copy(trainTargetData[i*targetCols:(i+1)*targetCols], targetData[i*targetCols:(i+1)*targetCols])
+	}
+
+	for i := split; i < rows; i++ {
+		copy(testFeatureData[(i-split)*cols:(i-split+1)*cols], featureData[i*cols:(i+1)*cols])
+		copy(testTargetData[(i-split)*targetCols:(i-split+1)*targetCols], targetData[i*targetCols:(i+1)*targetCols])
+	}
+
+	trainX = tensor.New(tensor.WithShape(split, cols), tensor.WithBacking(trainFeatureData))
+	trainY = tensor.New(tensor.WithShape(split, targetCols), tensor.WithBacking(trainTargetData))
+	testX = tensor.New(tensor.WithShape(rows-split, cols), tensor.WithBacking(testFeatureData))
+	testY = tensor.New(tensor.WithShape(rows-split, targetCols), tensor.WithBacking(testTargetData))
+
+	return
 }

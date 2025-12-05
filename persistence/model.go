@@ -47,14 +47,7 @@ type LayerConfig struct {
 	BiasShape   []int     `json:"bias_shape,omitempty"`
 	Alpha       float64   `json:"alpha,omitempty"`
 	// For Dropout
-	DropoutRate float64   `json:"dropout_rate,omitempty"`
-	// For Conv2D
-	InChannels  int `json:"in_channels,omitempty"`
-	OutChannels int `json:"out_channels,omitempty"`
-	// For Conv2D and MaxPool2D
-	KernelSize int `json:"kernel_size,omitempty"`
-	Stride     int `json:"stride,omitempty"`
-	Padding    int `json:"padding,omitempty"`
+	DropoutRate float64 `json:"dropout_rate,omitempty"`
 }
 
 type OptimizerConfig struct {
@@ -106,21 +99,6 @@ func SaveModel(model ModelInterface, filePath string) error {
 			layerConfig.WeightShape = wShape
 			layerConfig.Biases = bData
 			layerConfig.BiasShape = bShape
-		case *layer.Conv2D:
-			wData, wShape := tensorDenseToSerializable(typedLayer.GetWeights())
-			bData, bShape := tensorDenseToSerializable(typedLayer.GetBiases())
-			layerConfig.InChannels = typedLayer.InChannels
-			layerConfig.OutChannels = typedLayer.OutChannels
-			layerConfig.KernelSize = typedLayer.KernelSize
-			layerConfig.Stride = typedLayer.Stride
-			layerConfig.Padding = typedLayer.Padding
-			layerConfig.Weights = wData
-			layerConfig.WeightShape = wShape
-			layerConfig.Biases = bData
-			layerConfig.BiasShape = bShape
-		case *layer.MaxPool2D:
-			layerConfig.KernelSize = typedLayer.PoolSize
-			layerConfig.Stride = typedLayer.Stride
 		case *layer.LeakyReLU:
 			layerConfig.Alpha = typedLayer.Alpha
 		case *layer.Dropout:
@@ -190,17 +168,6 @@ func LoadModelData(filePath string) (*ModelData, error) {
 				linear.UpdateBiases(serializableToTensorDense(layerConfig.Biases, layerConfig.BiasShape))
 			}
 			newLayer = linear
-		case "Conv2D":
-			conv := layer.NewConv2D(layerConfig.InChannels, layerConfig.OutChannels, layerConfig.KernelSize, layerConfig.Stride, layerConfig.Padding)
-			if layerConfig.Weights != nil && len(layerConfig.WeightShape) > 0 {
-				conv.UpdateWeights(serializableToTensorDense(layerConfig.Weights, layerConfig.WeightShape))
-			}
-			if layerConfig.Biases != nil && len(layerConfig.BiasShape) > 0 {
-				conv.UpdateBiases(serializableToTensorDense(layerConfig.Biases, layerConfig.BiasShape))
-			}
-			newLayer = conv
-		case "MaxPool2D":
-			newLayer = layer.NewMaxPool2D(layerConfig.KernelSize, layerConfig.Stride)
 		case "Flatten":
 			newLayer = layer.NewFlatten()
 		case "LeakyReLU":

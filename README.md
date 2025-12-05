@@ -25,8 +25,6 @@ GoTorch is a deep learning framework implemented in pure Go, designed for simpli
 - **Pure Go Implementation**: No external C/C++ dependencies or bindings
 - **Key Neural Network Components**:
   - Linear (Dense) layers
-  - Convolutional layers (Conv2D)
-  - Pooling layers (MaxPool2D)
   - Flatten layer for reshaping
   - Dropout layer for regularization
   - Activation functions (ReLU, Leaky ReLU, Sigmoid, Softmax, SiLU/Swish)
@@ -38,8 +36,6 @@ GoTorch is a deep learning framework implemented in pure Go, designed for simpli
   - PyTorch-like model definition and training patterns
   - Easy migration from PyTorch concepts
 - **Advanced Data Processing**:
-  - **Image Support**: JPEG, PNG with automatic normalization to [0,1]
-  - **Streaming DataLoader**: Memory-efficient for large datasets
   - **CSV Support**: Automatic feature extraction and preprocessing
   - **Batch Processing**: Configurable batch sizes with shuffling
   - Training/testing data splitting with configurable ratios
@@ -74,8 +70,7 @@ GoTorch includes a user-friendly CLI tool that automatically handles environment
 
 ```bash
 # Run any GoTorch program
-gotorch run examples/train_minimal.go
-gotorch run examples/train_cnn.go
+gotorch run examples/train_basic.go
 gotorch run your_program.go
 
 # Pass arguments to your program
@@ -95,10 +90,10 @@ The CLI automatically sets `ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25` whic
 go install github.com/VigyatGoel/gotorch/cmd/gotorch@latest
 
 # Run minimal training example
-gotorch run examples/train_minimal.go
+gotorch run examples/train_basic.go
 
 # Or train on tabular data
-gotorch run examples/train_basic_minimal.go
+gotorch run examples/train_basic.go
 ```
 
 ## Architecture
@@ -108,8 +103,6 @@ GoTorch's architecture consists of the following key components:
 ### Layers
 
 - **Linear**: Fully connected layer with weights and biases
-- **Conv2d**: 2D convolutional layer for image processing
-- **MaxPool2d**: 2D max pooling layer for downsampling
 - **Flatten**: Flattens multi-dimensional input to 1D
 - **Dropout**: Regularization layer that randomly sets input units to 0
 - **ReLU**: Rectified Linear Unit activation function
@@ -129,9 +122,7 @@ GoTorch's architecture consists of the following key components:
 
 ### Data Handling
 
-- **DataLoader**: Unified interface for CSV and image data
-- **Image Processing**: Automatic loading, resizing, and normalization
-- **Streaming Support**: Memory-efficient processing for large datasets
+- **DataLoader**: Unified interface for CSV data
 - **Batch Iteration**: PyTorch-style `for batch := range` loops
 
 ## Examples
@@ -141,14 +132,7 @@ GoTorch includes multiple example implementations:
 ### Tabular Data (CSV)
 ```bash
 # Train on Iris dataset (CSV)
-gotorch run examples/train_basic_minimal.go
-```
-
-### Image Classification (CNN)
-```bash
-# Train CNN on CIFAR-10 images
-gotorch run examples/train_minimal.go
-gotorch run examples/train_cnn.go
+gotorch run examples/train_basic.go
 ```
 
 ### PyTorch-Style Training Loop
@@ -251,7 +235,6 @@ GoTorch is under active development, with plans to incorporate the following fea
 
 - **Expanded Data Handling**:
   - Support for more data formats (JSON, parquet)
-  - Image data preprocessing utilities
   - Text tokenization and embedding features
   - Time series data handling
 
