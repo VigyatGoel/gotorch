@@ -1,70 +1,62 @@
 package layer
 
 import (
-	"gorgonia.org/tensor"
 	"math/rand"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 // Dropout implements dropout regularization to prevent overfitting
 type Dropout struct {
-	DropoutRate float64       // dropout probability (0 to 1)
-	training    bool          // training mode flag
-	mask        *tensor.Dense // binary mask for dropped neurons
+	DropoutRate float64
+	training    bool
+	mask        *mat.Dense
 }
 
-// NewDropout creates a new dropout layer with given probability
 func NewDropout(p float64) *Dropout {
-	return &Dropout{
-		DropoutRate: p,
-		training:    true,
-	}
+	return &Dropout{DropoutRate: p, training: true}
 }
 
-// SetTraining enables/disables dropout (only active during training)
 func (d *Dropout) SetTraining(training bool) {
 	d.training = training
 }
 
-// Forward applies dropout mask during training, scales by 1/(1-p)
-func (d *Dropout) Forward(x *tensor.Dense) *tensor.Dense {
+func (d *Dropout) Forward(x *mat.Dense) *mat.Dense {
 	if !d.training || d.DropoutRate == 0.0 {
-		return x.Clone().(*tensor.Dense)
+		return mat.DenseCopyOf(x)
 	}
-
-	result := x.Clone().(*tensor.Dense)
-	data := result.Data().([]float64)
-	maskData := make([]float64, len(data))
+	rows, cols := x.Dims()
+	xData := x.RawMatrix().Data
+	resultData := make([]float64, rows*cols)
+	maskData := make([]float64, rows*cols)
 	scale := 1.0 / (1.0 - d.DropoutRate)
-	for i := range data {
+	for i, v := range xData {
 		if rand.Float64() < d.DropoutRate {
 			maskData[i] = 0.0
-			data[i] = 0.0
+			resultData[i] = 0.0
 		} else {
 			maskData[i] = scale
-			data[i] *= scale
+			resultData[i] = v * scale
 		}
 	}
-	d.mask = tensor.New(tensor.WithShape(x.Shape()...), tensor.WithBacking(maskData))
+	d.mask = mat.NewDense(rows, cols, maskData)
+	return mat.NewDense(rows, cols, resultData)
+}
+
+func (d *Dropout) Backward(gradOutput *mat.Dense) *mat.Dense {
+	if d.mask == nil {
+		return mat.DenseCopyOf(gradOutput)
+	}
+	rows, cols := gradOutput.Dims()
+	result := mat.NewDense(rows, cols, nil)
+	result.MulElem(gradOutput, d.mask)
 	return result
 }
 
-// Backward applies the same mask to gradients
-func (d *Dropout) Backward(gradOutput *tensor.Dense) *tensor.Dense {
-	if d.mask == nil {
-		return gradOutput.Clone().(*tensor.Dense)
-	}
-	result, _ := tensor.Mul(gradOutput, d.mask)
-	return result.(*tensor.Dense)
-}
-
-func (d *Dropout) GetWeights() *tensor.Dense                 { return nil }
-func (d *Dropout) GetGradients() *tensor.Dense               { return nil }
-func (d *Dropout) UpdateWeights(weightsUpdate *tensor.Dense) {}
-func (d *Dropout) GetBiases() *tensor.Dense                  { return nil }
-func (d *Dropout) GetBiasGradients() *tensor.Dense           { return nil }
-func (d *Dropout) UpdateBiases(biasUpdate *tensor.Dense)     {}
-
-// ClearCache releases dropout mask to prevent memory leaks
-func (d *Dropout) ClearCache() {
-	d.mask = nil
-}
+func (d *Dropout) GetWeights() *mat.Dense       { return nil }
+func (d *Dropout) GetGradients() *mat.Dense     { return nil }
+func (d *Dropout) UpdateWeights(w *mat.Dense)   {}
+func (d *Dropout) GetBiases() *mat.Dense        { return nil }
+func (d *Dropout) GetBiasGradients() *mat.Dense { return nil }
+func (d *Dropout) UpdateBiases(b *mat.Dense)    {}
+func (d *Dropout) ClearCache()                  { d.mask = nil }

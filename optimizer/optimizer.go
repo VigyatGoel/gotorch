@@ -1,10 +1,10 @@
 package optimizer
 
-import "gorgonia.org/tensor"
+import "gonum.org/v1/gonum/mat"
 
 type Optimizer interface {
-	Step(weights *tensor.Dense, gradients *tensor.Dense) *tensor.Dense
-	StepBias(biases *tensor.Dense, biasGradients *tensor.Dense) *tensor.Dense
+	Step(weights *mat.Dense, gradients *mat.Dense) *mat.Dense
+	StepBias(biases *mat.Dense, biasGradients *mat.Dense) *mat.Dense
 	ZeroGrad()
 	GetLearningRate() float64
 }

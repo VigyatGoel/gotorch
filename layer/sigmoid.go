@@ -1,52 +1,44 @@
 package layer
 
 import (
-	"gorgonia.org/tensor"
 	"math"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 // Sigmoid implements sigmoid activation: f(x) = 1 / (1 + exp(-x))
 type Sigmoid struct {
-	output *tensor.Dense // cached output for gradient computation
+	output *mat.Dense
 }
 
-// NewSigmoid creates a new sigmoid activation layer
 func NewSigmoid() *Sigmoid {
 	return &Sigmoid{}
 }
 
-// Forward applies sigmoid activation element-wise
-func (s *Sigmoid) Forward(x *tensor.Dense) *tensor.Dense {
-	s.output = x.Clone().(*tensor.Dense)
-	data := s.output.Data().([]float64)
+func (s *Sigmoid) Forward(x *mat.Dense) *mat.Dense {
+	s.output = mat.DenseCopyOf(x)
+	data := s.output.RawMatrix().Data
 	for i, v := range data {
 		data[i] = 1.0 / (1.0 + math.Exp(-v))
 	}
 	return s.output
 }
 
-// Backward computes sigmoid gradient: output * (1 - output)
-func (s *Sigmoid) Backward(gradOutput *tensor.Dense) *tensor.Dense {
-	deriv := s.output.Clone().(*tensor.Dense)
-	derivData := deriv.Data().([]float64)
-	outputData := s.output.Data().([]float64)
-
+func (s *Sigmoid) Backward(gradOutput *mat.Dense) *mat.Dense {
+	rows, cols := s.output.Dims()
+	outputData := s.output.RawMatrix().Data
+	gradData := gradOutput.RawMatrix().Data
+	resultData := make([]float64, rows*cols)
 	for i, v := range outputData {
-		derivData[i] = v * (1.0 - v)
+		resultData[i] = v * (1.0 - v) * gradData[i]
 	}
-
-	result, _ := tensor.Mul(deriv, gradOutput)
-	return result.(*tensor.Dense)
+	return mat.NewDense(rows, cols, resultData)
 }
 
-func (s *Sigmoid) GetWeights() *tensor.Dense                 { return nil }
-func (s *Sigmoid) GetGradients() *tensor.Dense               { return nil }
-func (s *Sigmoid) UpdateWeights(weightsUpdate *tensor.Dense) {}
-func (s *Sigmoid) GetBiases() *tensor.Dense                  { return nil }
-func (s *Sigmoid) GetBiasGradients() *tensor.Dense           { return nil }
-func (s *Sigmoid) UpdateBiases(biasUpdate *tensor.Dense)     {}
-
-// ClearCache releases cached output to prevent memory leaks
-func (s *Sigmoid) ClearCache() {
-	s.output = nil
-}
+func (s *Sigmoid) GetWeights() *mat.Dense       { return nil }
+func (s *Sigmoid) GetGradients() *mat.Dense     { return nil }
+func (s *Sigmoid) UpdateWeights(w *mat.Dense)   {}
+func (s *Sigmoid) GetBiases() *mat.Dense        { return nil }
+func (s *Sigmoid) GetBiasGradients() *mat.Dense { return nil }
+func (s *Sigmoid) UpdateBiases(b *mat.Dense)    {}
+func (s *Sigmoid) ClearCache()                  { s.output = nil }

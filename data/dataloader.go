@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gorgonia.org/tensor"
+	"gonum.org/v1/gonum/mat"
 )
 
 type DataType int
@@ -20,21 +20,20 @@ const (
 )
 
 type DataLoader struct {
-	FilePath    string
-	DataType    DataType
-	Shuffle     bool
-	Seed        int64
-	SplitRatio  float64
-	BatchSize   int
-	Features    *tensor.Dense
-	Targets     *tensor.Dense
-	ClassNames  []string
-	ColumnNames []string
+	FilePath   string
+	DataType   DataType
+	Shuffle    bool
+	Seed       int64
+	SplitRatio float64
+	BatchSize  int
+	Features   *mat.Dense
+	Targets    *mat.Dense
+	ClassNames []string
 }
 
 type Batch struct {
-	Features *tensor.Dense
-	Targets  *tensor.Dense
+	Features *mat.Dense
+	Targets  *mat.Dense
 }
 
 func NewDataLoader(filePath string, dataType DataType, batchSize int) *DataLoader {
@@ -65,14 +64,11 @@ func (dl *DataLoader) Load() error {
 		return fmt.Errorf("no data found")
 	}
 
-	dl.ColumnNames = records[0]
 	records = records[1:]
-
 	rows := len(records)
 	cols := len(records[0])
 	featuresData := make([]float64, rows*(cols-1))
 
-	// Parse features
 	for i, record := range records {
 		for j := 0; j < cols-1; j++ {
 			val, err := strconv.ParseFloat(strings.TrimSpace(record[j]), 64)
@@ -82,9 +78,8 @@ func (dl *DataLoader) Load() error {
 			featuresData[i*(cols-1)+j] = val
 		}
 	}
-	dl.Features = tensor.New(tensor.WithShape(rows, cols-1), tensor.WithBacking(featuresData))
+	dl.Features = mat.NewDense(rows, cols-1, featuresData)
 
-	// Parse targets
 	if dl.DataType == Classification {
 		classMap := make(map[string]int)
 		for _, record := range records {
@@ -94,13 +89,12 @@ func (dl *DataLoader) Load() error {
 				dl.ClassNames = append(dl.ClassNames, label)
 			}
 		}
-
 		targetsData := make([]float64, rows*len(dl.ClassNames))
 		for i, record := range records {
 			label := strings.TrimSpace(record[cols-1])
 			targetsData[i*len(dl.ClassNames)+classMap[label]] = 1.0
 		}
-		dl.Targets = tensor.New(tensor.WithShape(rows, len(dl.ClassNames)), tensor.WithBacking(targetsData))
+		dl.Targets = mat.NewDense(rows, len(dl.ClassNames), targetsData)
 	} else {
 		targetsData := make([]float64, rows)
 		for i, record := range records {
@@ -110,46 +104,29 @@ func (dl *DataLoader) Load() error {
 			}
 			targetsData[i] = val
 		}
-		dl.Targets = tensor.New(tensor.WithShape(rows, 1), tensor.WithBacking(targetsData))
+		dl.Targets = mat.NewDense(rows, 1, targetsData)
 	}
 
 	if dl.Shuffle {
 		dl.shuffle()
 	}
-
 	return nil
 }
 
 func (dl *DataLoader) shuffle() {
 	r := rand.New(rand.NewSource(dl.Seed))
+	featureData := dl.Features.RawMatrix().Data
+	targetData := dl.Targets.RawMatrix().Data
+	fRows, fCols := dl.Features.Dims()
+	_, tCols := dl.Targets.Dims()
 
-	// Get data slices
-	featureData := dl.Features.Data().([]float64)
-	targetData := dl.Targets.Data().([]float64)
-
-	// Get shapes
-	featureShape := dl.Features.Shape()
-	targetShape := dl.Targets.Shape()
-
-	rows := featureShape[0]
-	featureCols := featureShape[1]
-	targetCols := targetShape[1]
-
-	for i := rows - 1; i > 0; i-- {
+	for i := fRows - 1; i > 0; i-- {
 		j := r.Intn(i + 1)
-
-		// Swap feature rows
-		for k := 0; k < featureCols; k++ {
-			idxI := i*featureCols + k
-			idxJ := j*featureCols + k
-			featureData[idxI], featureData[idxJ] = featureData[idxJ], featureData[idxI]
+		for k := 0; k < fCols; k++ {
+			featureData[i*fCols+k], featureData[j*fCols+k] = featureData[j*fCols+k], featureData[i*fCols+k]
 		}
-
-		// Swap target rows
-		for k := 0; k < targetCols; k++ {
-			idxI := i*targetCols + k
-			idxJ := j*targetCols + k
-			targetData[idxI], targetData[idxJ] = targetData[idxJ], targetData[idxI]
+		for k := 0; k < tCols; k++ {
+			targetData[i*tCols+k], targetData[j*tCols+k] = targetData[j*tCols+k], targetData[i*tCols+k]
 		}
 	}
 }
@@ -158,215 +135,124 @@ func (dl *DataLoader) GetClassNames() []string {
 	return dl.ClassNames
 }
 
-func (dl *DataLoader) GetColumnNames() []string {
-	return dl.ColumnNames
-}
+func (dl *DataLoader) GetBatches(features *mat.Dense, targets *mat.Dense, epoch int) []Batch {
+	fRows, fCols := features.Dims()
+	_, tCols := targets.Dims()
 
-func (dl *DataLoader) GetAll() (*tensor.Dense, *tensor.Dense) {
-	return dl.Features, dl.Targets
-}
-
-func (dl *DataLoader) GetBatches(features *tensor.Dense, targets *tensor.Dense, epoch int) []Batch {
-	shape := features.Shape()
-	rows := shape[0]
 	if dl.BatchSize <= 0 {
 		return []Batch{{Features: features, Targets: targets}}
 	}
 
-	indices := make([]int, rows)
-	for i := 0; i < rows; i++ {
+	indices := make([]int, fRows)
+	for i := range indices {
 		indices[i] = i
 	}
-
 	if dl.Shuffle {
-		epochSeed := dl.Seed + int64(epoch)
-		r := rand.New(rand.NewSource(epochSeed))
-		r.Shuffle(rows, func(i, j int) {
-			indices[i], indices[j] = indices[j], indices[i]
-		})
+		r := rand.New(rand.NewSource(dl.Seed + int64(epoch)))
+		r.Shuffle(fRows, func(i, j int) { indices[i], indices[j] = indices[j], indices[i] })
 	}
 
-	numBatches := int(math.Ceil(float64(rows) / float64(dl.BatchSize)))
+	featureData := features.RawMatrix().Data
+	targetData := targets.RawMatrix().Data
+	numBatches := int(math.Ceil(float64(fRows) / float64(dl.BatchSize)))
 	batches := make([]Batch, 0, numBatches)
 
-	// Get data slices
-	featureData := features.Data().([]float64)
-	targetData := targets.Data().([]float64)
-
-	// Get shapes
-	featureShape := features.Shape()
-	targetShape := targets.Shape()
-	featureCols := featureShape[1]
-	targetCols := targetShape[1]
-
-	for i := 0; i < rows; i += dl.BatchSize {
+	for i := 0; i < fRows; i += dl.BatchSize {
 		end := i + dl.BatchSize
-		if end > rows {
-			end = rows
+		if end > fRows {
+			end = fRows
 		}
-
 		batchSize := end - i
-		batchFeatureData := make([]float64, batchSize*featureCols)
-		batchTargetData := make([]float64, batchSize*targetCols)
+		batchFeatureData := make([]float64, batchSize*fCols)
+		batchTargetData := make([]float64, batchSize*tCols)
 
 		for j := i; j < end; j++ {
-			srcIdx := indices[j]
-			dstIdx := j - i
-
-			// Copy feature data
-			for k := 0; k < featureCols; k++ {
-				batchFeatureData[dstIdx*featureCols+k] = featureData[srcIdx*featureCols+k]
-			}
-
-			// Copy target data
-			for k := 0; k < targetCols; k++ {
-				batchTargetData[dstIdx*targetCols+k] = targetData[srcIdx*targetCols+k]
-			}
+			src := indices[j]
+			dst := j - i
+			copy(batchFeatureData[dst*fCols:(dst+1)*fCols], featureData[src*fCols:(src+1)*fCols])
+			copy(batchTargetData[dst*tCols:(dst+1)*tCols], targetData[src*tCols:(src+1)*tCols])
 		}
-
-		batchFeatures := tensor.New(tensor.WithShape(batchSize, featureCols), tensor.WithBacking(batchFeatureData))
-		batchTargets := tensor.New(tensor.WithShape(batchSize, targetCols), tensor.WithBacking(batchTargetData))
-		batches = append(batches, Batch{Features: batchFeatures, Targets: batchTargets})
+		batches = append(batches, Batch{
+			Features: mat.NewDense(batchSize, fCols, batchFeatureData),
+			Targets:  mat.NewDense(batchSize, tCols, batchTargetData),
+		})
 	}
-
 	return batches
 }
 
-// TrainBatches returns a channel for PyTorch-style iteration over training batches
-func (dl *DataLoader) TrainBatches(epoch int) <-chan Batch {
-	ch := make(chan Batch)
-	go func() {
-		defer close(ch)
-		trainX, trainY, _, _ := dl.Split()
-		if trainX == nil || trainY == nil {
-			return
-		}
-		batches := dl.GetBatches(trainX, trainY, epoch)
-		for _, batch := range batches {
-			ch <- batch
-		}
-	}()
-	return ch
-}
-
-// TestBatches returns a channel for PyTorch-style iteration over test batches
-func (dl *DataLoader) TestBatches() <-chan Batch {
-	ch := make(chan Batch)
-	go func() {
-		defer close(ch)
-		_, _, testX, testY := dl.Split()
-		if testX == nil || testY == nil {
-			return
-		}
-		batches := dl.GetBatches(testX, testY, 0)
-		for _, batch := range batches {
-			ch <- batch
-		}
-	}()
-	return ch
-}
-
 func (dl *DataLoader) NormalizeFeatures() {
-	shape := dl.Features.Shape()
-	rows := shape[0]
-	if rows == 0 {
+	fRows, fCols := dl.Features.Dims()
+	if fRows == 0 {
 		return
 	}
-	cols := shape[1]
+	data := dl.Features.RawMatrix().Data
 
-	// Get data slice
-	featureData := dl.Features.Data().([]float64)
-
-	// Calculate means
-	means := make([]float64, cols)
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			means[j] += featureData[i*cols+j]
+	means := make([]float64, fCols)
+	for i := 0; i < fRows; i++ {
+		for j := 0; j < fCols; j++ {
+			means[j] += data[i*fCols+j]
 		}
 	}
-	for j := 0; j < cols; j++ {
-		means[j] /= float64(rows)
+	for j := range means {
+		means[j] /= float64(fRows)
 	}
 
-	// Calculate standard deviations
-	stdDevs := make([]float64, cols)
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			diff := featureData[i*cols+j] - means[j]
+	stdDevs := make([]float64, fCols)
+	for i := 0; i < fRows; i++ {
+		for j := 0; j < fCols; j++ {
+			diff := data[i*fCols+j] - means[j]
 			stdDevs[j] += diff * diff
 		}
 	}
-	for j := 0; j < cols; j++ {
-		stdDevs[j] = math.Sqrt(stdDevs[j] / float64(rows))
+	for j := range stdDevs {
+		stdDevs[j] = math.Sqrt(stdDevs[j] / float64(fRows))
 		if stdDevs[j] == 0 {
 			stdDevs[j] = 1
 		}
 	}
 
-	// Normalize features
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			featureData[i*cols+j] = (featureData[i*cols+j] - means[j]) / stdDevs[j]
+	for i := 0; i < fRows; i++ {
+		for j := 0; j < fCols; j++ {
+			data[i*fCols+j] = (data[i*fCols+j] - means[j]) / stdDevs[j]
 		}
 	}
 }
 
 func (dl *DataLoader) NumFeatures() int {
-	shape := dl.Features.Shape()
-	if len(shape) < 2 {
-		if len(dl.ColumnNames) > 1 {
-			return len(dl.ColumnNames) - 1
-		}
-		return 0
-	}
-	return shape[1]
+	_, cols := dl.Features.Dims()
+	return cols
 }
 
-func (dl *DataLoader) Split() (trainX, trainY, testX, testY *tensor.Dense) {
-	shape := dl.Features.Shape()
-	rows := shape[0]
-	if rows == 0 {
+func (dl *DataLoader) Split() (trainX, trainY, testX, testY *mat.Dense) {
+	fRows, fCols := dl.Features.Dims()
+	_, tCols := dl.Targets.Dims()
+	if fRows == 0 {
 		return nil, nil, nil, nil
 	}
 
-	cols := shape[1]
-	targetShape := dl.Targets.Shape()
-	targetCols := targetShape[1]
-
-	split := int(float64(rows) * dl.SplitRatio)
+	split := int(float64(fRows) * dl.SplitRatio)
 	if split <= 0 {
 		split = 1
-	} else if split >= rows {
-		split = rows - 1
+	} else if split >= fRows {
+		split = fRows - 1
 	}
 
-	// Get data slices
-	featureData := dl.Features.Data().([]float64)
-	targetData := dl.Targets.Data().([]float64)
+	featureData := dl.Features.RawMatrix().Data
+	targetData := dl.Targets.RawMatrix().Data
 
-	// Create training data slices
-	trainFeatureData := make([]float64, split*cols)
-	trainTargetData := make([]float64, split*targetCols)
+	trainFData := make([]float64, split*fCols)
+	trainTData := make([]float64, split*tCols)
+	testFData := make([]float64, (fRows-split)*fCols)
+	testTData := make([]float64, (fRows-split)*tCols)
 
-	// Create test data slices
-	testFeatureData := make([]float64, (rows-split)*cols)
-	testTargetData := make([]float64, (rows-split)*targetCols)
+	copy(trainFData, featureData[:split*fCols])
+	copy(trainTData, targetData[:split*tCols])
+	copy(testFData, featureData[split*fCols:])
+	copy(testTData, targetData[split*tCols:])
 
-	// Copy data
-	for i := 0; i < split; i++ {
-		copy(trainFeatureData[i*cols:(i+1)*cols], featureData[i*cols:(i+1)*cols])
-		copy(trainTargetData[i*targetCols:(i+1)*targetCols], targetData[i*targetCols:(i+1)*targetCols])
-	}
-
-	for i := split; i < rows; i++ {
-		copy(testFeatureData[(i-split)*cols:(i-split+1)*cols], featureData[i*cols:(i+1)*cols])
-		copy(testTargetData[(i-split)*targetCols:(i-split+1)*targetCols], targetData[i*targetCols:(i+1)*targetCols])
-	}
-
-	trainX = tensor.New(tensor.WithShape(split, cols), tensor.WithBacking(trainFeatureData))
-	trainY = tensor.New(tensor.WithShape(split, targetCols), tensor.WithBacking(trainTargetData))
-	testX = tensor.New(tensor.WithShape(rows-split, cols), tensor.WithBacking(testFeatureData))
-	testY = tensor.New(tensor.WithShape(rows-split, targetCols), tensor.WithBacking(testTargetData))
-
+	trainX = mat.NewDense(split, fCols, trainFData)
+	trainY = mat.NewDense(split, tCols, trainTData)
+	testX = mat.NewDense(fRows-split, fCols, testFData)
+	testY = mat.NewDense(fRows-split, tCols, testTData)
 	return
 }

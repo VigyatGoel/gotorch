@@ -4,7 +4,7 @@ import (
 	"github.com/VigyatGoel/gotorch/layer"
 	"github.com/VigyatGoel/gotorch/optimizer"
 	"github.com/VigyatGoel/gotorch/persistence"
-	"gorgonia.org/tensor"
+	"gonum.org/v1/gonum/mat"
 )
 
 type Sequential struct {
@@ -21,54 +21,43 @@ func (s *Sequential) GetOptimizer() optimizer.Optimizer {
 }
 
 func NewSequential(layers ...layer.Layer) *Sequential {
-	return &Sequential{
-		Layers: layers,
-	}
+	return &Sequential{Layers: layers}
 }
 
 func (s *Sequential) SetOptimizer(opt optimizer.Optimizer) {
 	s.Optimizer = opt
 }
 
-func (s *Sequential) Add(layer layer.Layer) {
-	s.Layers = append(s.Layers, layer)
+func (s *Sequential) Add(l layer.Layer) {
+	s.Layers = append(s.Layers, l)
 }
 
-func (s *Sequential) Forward(input *tensor.Dense) *tensor.Dense {
+func (s *Sequential) Forward(input *mat.Dense) *mat.Dense {
 	output := input
-	for _, layer := range s.Layers {
-		output = layer.Forward(output)
+	for _, l := range s.Layers {
+		output = l.Forward(output)
 	}
 	return output
 }
 
-func (s *Sequential) Backward(gradOutput *tensor.Dense) *tensor.Dense {
+func (s *Sequential) Backward(gradOutput *mat.Dense) *mat.Dense {
 	for i := len(s.Layers) - 1; i >= 0; i-- {
 		gradOutput = s.Layers[i].Backward(gradOutput)
 	}
-
 	if s.Optimizer != nil {
 		for _, l := range s.Layers {
-			weights := l.GetWeights()
-			gradients := l.GetGradients()
-			if weights != nil && gradients != nil {
-				updatedWeights := s.Optimizer.Step(weights, gradients)
-				l.UpdateWeights(updatedWeights)
+			if w, g := l.GetWeights(), l.GetGradients(); w != nil && g != nil {
+				l.UpdateWeights(s.Optimizer.Step(w, g))
 			}
-
-			biases := l.GetBiases()
-			biasGradients := l.GetBiasGradients()
-			if biases != nil && biasGradients != nil {
-				updatedBiases := s.Optimizer.StepBias(biases, biasGradients)
-				l.UpdateBiases(updatedBiases)
+			if b, bg := l.GetBiases(), l.GetBiasGradients(); b != nil && bg != nil {
+				l.UpdateBiases(s.Optimizer.StepBias(b, bg))
 			}
 		}
 	}
-
 	return gradOutput
 }
 
-func (s *Sequential) Predict(input *tensor.Dense) *tensor.Dense {
+func (s *Sequential) Predict(input *mat.Dense) *mat.Dense {
 	return s.Forward(input)
 }
 
@@ -93,15 +82,6 @@ func (s *Sequential) ClearCache() {
 		if clearable, ok := l.(interface{ ClearCache() }); ok {
 			clearable.ClearCache()
 		}
-		if flatten, ok := l.(*layer.Flatten); ok {
-			flatten.ClearCache()
-		} else if relu, ok := l.(*layer.ReLU); ok {
-			relu.ClearCache()
-		} else if softmax, ok := l.(*layer.Softmax); ok {
-			softmax.ClearCache()
-		} else if dropout, ok := l.(*layer.Dropout); ok {
-			dropout.ClearCache()
-		}
 	}
 }
 
@@ -114,11 +94,8 @@ func Load(filePath string) (*Sequential, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	model := &Sequential{
+	return &Sequential{
 		Layers:    modelData.Layers,
 		Optimizer: modelData.Optimizer,
-	}
-
-	return model, nil
+	}, nil
 }

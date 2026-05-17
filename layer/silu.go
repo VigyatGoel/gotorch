@@ -1,61 +1,51 @@
 package layer
 
 import (
-	"gorgonia.org/tensor"
 	"math"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 // SiLU implements Sigmoid Linear Unit (Swish): f(x) = x * sigmoid(x)
 type SiLU struct {
-	input  *tensor.Dense // cached input for gradient computation
-	output *tensor.Dense // cached output
+	input  *mat.Dense
+	output *mat.Dense
 }
 
-// NewSiLU creates a new SiLU (Swish) activation layer
 func NewSiLU() *SiLU {
 	return &SiLU{}
 }
 
-// Forward applies SiLU activation: x * sigmoid(x)
-func (s *SiLU) Forward(x *tensor.Dense) *tensor.Dense {
-	s.input = x.Clone().(*tensor.Dense)
-	s.output = x.Clone().(*tensor.Dense)
-	data := s.output.Data().([]float64)
-	inputData := s.input.Data().([]float64)
-
+func (s *SiLU) Forward(x *mat.Dense) *mat.Dense {
+	s.input = mat.DenseCopyOf(x)
+	rows, cols := x.Dims()
+	inputData := x.RawMatrix().Data
+	outputData := make([]float64, rows*cols)
 	for i, v := range inputData {
 		sigmoid := 1.0 / (1.0 + math.Exp(-v))
-		data[i] = v * sigmoid
+		outputData[i] = v * sigmoid
 	}
+	s.output = mat.NewDense(rows, cols, outputData)
 	return s.output
 }
 
-// Backward computes SiLU gradient: sigmoid(x) + x * sigmoid(x) * (1 - sigmoid(x))
-func (s *SiLU) Backward(gradOutput *tensor.Dense) *tensor.Dense {
-	inputData := s.input.Data().([]float64)
-	gradData := gradOutput.Data().([]float64)
-
-	resultData := make([]float64, len(gradData))
-
+func (s *SiLU) Backward(gradOutput *mat.Dense) *mat.Dense {
+	rows, cols := s.input.Dims()
+	inputData := s.input.RawMatrix().Data
+	gradData := gradOutput.RawMatrix().Data
+	resultData := make([]float64, rows*cols)
 	for i, x := range inputData {
 		sigmoid := 1.0 / (1.0 + math.Exp(-x))
 		deriv := sigmoid + x*sigmoid*(1-sigmoid)
 		resultData[i] = deriv * gradData[i]
 	}
-
-	result := tensor.New(tensor.WithShape(gradOutput.Shape()...), tensor.WithBacking(resultData))
-	return result
+	return mat.NewDense(rows, cols, resultData)
 }
 
-func (s *SiLU) GetWeights() *tensor.Dense                 { return nil }
-func (s *SiLU) GetGradients() *tensor.Dense               { return nil }
-func (s *SiLU) UpdateWeights(weightsUpdate *tensor.Dense) {}
-func (s *SiLU) GetBiases() *tensor.Dense                  { return nil }
-func (s *SiLU) GetBiasGradients() *tensor.Dense           { return nil }
-func (s *SiLU) UpdateBiases(biasUpdate *tensor.Dense)     {}
-
-// ClearCache releases cached tensors to prevent memory leaks
-func (s *SiLU) ClearCache() {
-	s.input = nil
-	s.output = nil
-}
+func (s *SiLU) GetWeights() *mat.Dense       { return nil }
+func (s *SiLU) GetGradients() *mat.Dense     { return nil }
+func (s *SiLU) UpdateWeights(w *mat.Dense)   {}
+func (s *SiLU) GetBiases() *mat.Dense        { return nil }
+func (s *SiLU) GetBiasGradients() *mat.Dense { return nil }
+func (s *SiLU) UpdateBiases(b *mat.Dense)    {}
+func (s *SiLU) ClearCache()                  { s.input = nil; s.output = nil }

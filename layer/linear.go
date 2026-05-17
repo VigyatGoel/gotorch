@@ -4,128 +4,77 @@ import (
 	"math"
 	"math/rand"
 
-	"gorgonia.org/tensor"
+	"gonum.org/v1/gonum/mat"
 )
 
 var rng = rand.New(rand.NewSource(42))
 
-// Linear represents a fully connected layer with learnable weights and biases
 type Linear struct {
-	inputMat   *tensor.Dense // cached input for backward pass
-	weightMat  *tensor.Dense // learnable weight matrix
-	biasMat    *tensor.Dense // learnable bias vector
-	dWeightMat *tensor.Dense // weight gradients
-	dBiasMat   *tensor.Dense // bias gradients
+	inputMat   *mat.Dense
+	weightMat  *mat.Dense
+	biasMat    *mat.Dense
+	dWeightMat *mat.Dense
+	dBiasMat   *mat.Dense
 }
 
-// NewLinear creates a new linear layer with Xavier initialization
 func NewLinear(inFeatures, outFeatures int) *Linear {
 	weightData := make([]float64, inFeatures*outFeatures)
 	limit := math.Sqrt(6.0 / float64(inFeatures+outFeatures))
 	for i := range weightData {
 		weightData[i] = (rng.Float64()*2 - 1) * limit
 	}
-	weightMat := tensor.New(tensor.WithShape(inFeatures, outFeatures), tensor.WithBacking(weightData))
-
-	biasData := make([]float64, outFeatures)
-	biasMat := tensor.New(tensor.WithShape(1, outFeatures), tensor.WithBacking(biasData))
-
-	dWeightMat := tensor.New(tensor.WithShape(inFeatures, outFeatures), tensor.WithBacking(make([]float64, inFeatures*outFeatures)))
-	dBiasMat := tensor.New(tensor.WithShape(1, outFeatures), tensor.WithBacking(make([]float64, outFeatures)))
-
 	return &Linear{
-		weightMat:  weightMat,
-		biasMat:    biasMat,
-		dWeightMat: dWeightMat,
-		dBiasMat:   dBiasMat,
+		weightMat:  mat.NewDense(inFeatures, outFeatures, weightData),
+		biasMat:    mat.NewDense(1, outFeatures, make([]float64, outFeatures)),
+		dWeightMat: mat.NewDense(inFeatures, outFeatures, make([]float64, inFeatures*outFeatures)),
+		dBiasMat:   mat.NewDense(1, outFeatures, make([]float64, outFeatures)),
 	}
 }
 
-// Forward performs linear transformation: output = input * weight + bias
-func (l *Linear) Forward(x *tensor.Dense) *tensor.Dense {
+func (l *Linear) Forward(x *mat.Dense) *mat.Dense {
 	l.inputMat = x
+	batchSize, _ := x.Dims()
+	_, outF := l.weightMat.Dims()
 
-	result, err := tensor.MatMul(x, l.weightMat)
-	if err != nil {
-		panic(err)
-	}
+	result := mat.NewDense(batchSize, outF, nil)
+	result.Mul(x, l.weightMat)
 
-	resultShape := result.Shape()
-	batchSize := resultShape[0]
-
-	biasData := l.biasMat.Data().([]float64)
-	expandedBiasData := make([]float64, batchSize*len(biasData))
+	biasData := l.biasMat.RawMatrix().Data
+	expandedBiasData := make([]float64, batchSize*outF)
 	for i := 0; i < batchSize; i++ {
-		copy(expandedBiasData[i*len(biasData):(i+1)*len(biasData)], biasData)
+		copy(expandedBiasData[i*outF:(i+1)*outF], biasData)
 	}
-
-	expandedBias := tensor.New(tensor.WithShape(resultShape...), tensor.WithBacking(expandedBiasData))
-
-	resultWithBias, err := tensor.Add(result, expandedBias)
-	if err != nil {
-		panic(err)
-	}
-
-	return resultWithBias.(*tensor.Dense)
+	expandedBias := mat.NewDense(batchSize, outF, expandedBiasData)
+	result.Add(result, expandedBias)
+	return result
 }
 
-// Backward computes gradients for weights, biases, and input
-func (l *Linear) Backward(gradOutput *tensor.Dense) *tensor.Dense {
-	inputT, _ := tensor.Transpose(l.inputMat)
-	weightGrad, _ := tensor.MatMul(inputT, gradOutput)
-	l.dWeightMat = weightGrad.(*tensor.Dense)
+func (l *Linear) Backward(gradOutput *mat.Dense) *mat.Dense {
+	inF, outF := l.weightMat.Dims()
+	batchSize, _ := gradOutput.Dims()
 
-	gradShape := gradOutput.Shape()
-	if len(gradShape) > 1 {
-		axis := make([]int, len(gradShape)-1)
-		for i := 0; i < len(axis); i++ {
-			axis[i] = i
+	weightGrad := mat.NewDense(inF, outF, nil)
+	weightGrad.Mul(l.inputMat.T(), gradOutput)
+	l.dWeightMat = weightGrad
+
+	gradData := gradOutput.RawMatrix().Data
+	biasGradData := make([]float64, outF)
+	for i := 0; i < batchSize; i++ {
+		for j := 0; j < outF; j++ {
+			biasGradData[j] += gradData[i*outF+j]
 		}
-		biasGrad, _ := tensor.Sum(gradOutput, axis...)
-		if bd, ok := biasGrad.(*tensor.Dense); ok {
-			l.dBiasMat = bd
-		} else {
-			biasData := biasGrad.Data().([]float64)
-			origShape := biasGrad.Shape()
-			l.dBiasMat = tensor.New(tensor.WithShape(origShape...), tensor.WithBacking(biasData))
-		}
-		l.dBiasMat.Reshape(1, l.dBiasMat.Shape()[len(l.dBiasMat.Shape())-1])
-	} else {
-		l.dBiasMat = gradOutput.Clone().(*tensor.Dense)
-		l.dBiasMat.Reshape(1, gradOutput.Shape()[0])
 	}
+	l.dBiasMat = mat.NewDense(1, outF, biasGradData)
 
-	weightT, _ := tensor.Transpose(l.weightMat)
-	gradInputMat, _ := tensor.MatMul(gradOutput, weightT)
-
-	return gradInputMat.(*tensor.Dense)
+	gradInput := mat.NewDense(batchSize, inF, nil)
+	gradInput.Mul(gradOutput, l.weightMat.T())
+	return gradInput
 }
 
-func (l *Linear) GetWeights() *tensor.Dense {
-	return l.weightMat
-}
-
-func (l *Linear) GetGradients() *tensor.Dense {
-	return l.dWeightMat
-}
-
-func (l *Linear) UpdateWeights(weightsUpdate *tensor.Dense) {
-	l.weightMat = weightsUpdate.Clone().(*tensor.Dense)
-}
-
-func (l *Linear) GetBiases() *tensor.Dense {
-	return l.biasMat
-}
-
-func (l *Linear) GetBiasGradients() *tensor.Dense {
-	return l.dBiasMat
-}
-
-func (l *Linear) UpdateBiases(biasUpdate *tensor.Dense) {
-	l.biasMat = biasUpdate.Clone().(*tensor.Dense)
-}
-
-// ClearCache releases cached input to prevent memory leaks
-func (l *Linear) ClearCache() {
-	l.inputMat = nil
-}
+func (l *Linear) GetWeights() *mat.Dense       { return l.weightMat }
+func (l *Linear) GetGradients() *mat.Dense     { return l.dWeightMat }
+func (l *Linear) UpdateWeights(w *mat.Dense)   { l.weightMat = mat.DenseCopyOf(w) }
+func (l *Linear) GetBiases() *mat.Dense        { return l.biasMat }
+func (l *Linear) GetBiasGradients() *mat.Dense { return l.dBiasMat }
+func (l *Linear) UpdateBiases(b *mat.Dense)    { l.biasMat = mat.DenseCopyOf(b) }
+func (l *Linear) ClearCache()                  { l.inputMat = nil }

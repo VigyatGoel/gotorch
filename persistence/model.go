@@ -10,26 +10,27 @@ import (
 
 	"github.com/VigyatGoel/gotorch/layer"
 	"github.com/VigyatGoel/gotorch/optimizer"
-	"gorgonia.org/tensor"
+	"gonum.org/v1/gonum/mat"
 )
 
-func tensorDenseToSerializable(t *tensor.Dense) (data []float64, shape []int) {
-	if t == nil {
+func matDenseToSerializable(m *mat.Dense) (data []float64, shape []int) {
+	if m == nil {
 		return nil, nil
 	}
-	shape = t.Shape()
-	data = make([]float64, len(t.Data().([]float64)))
-	copy(data, t.Data().([]float64))
-	return data, shape
+	rows, cols := m.Dims()
+	raw := m.RawMatrix().Data
+	data = make([]float64, len(raw))
+	copy(data, raw)
+	return data, []int{rows, cols}
 }
 
-func serializableToTensorDense(data []float64, shape []int) *tensor.Dense {
-	if data == nil || len(shape) == 0 {
+func serializableToMatDense(data []float64, shape []int) *mat.Dense {
+	if data == nil || len(shape) != 2 {
 		return nil
 	}
-	dataCopy := make([]float64, len(data))
-	copy(dataCopy, data)
-	return tensor.New(tensor.WithShape(shape...), tensor.WithBacking(dataCopy))
+	cp := make([]float64, len(data))
+	copy(cp, data)
+	return mat.NewDense(shape[0], shape[1], cp)
 }
 
 type ModelInterface interface {
@@ -46,8 +47,7 @@ type LayerConfig struct {
 	Biases      []float64 `json:"biases,omitempty"`
 	BiasShape   []int     `json:"bias_shape,omitempty"`
 	Alpha       float64   `json:"alpha,omitempty"`
-	// For Dropout
-	DropoutRate float64 `json:"dropout_rate,omitempty"`
+	DropoutRate float64   `json:"dropout_rate,omitempty"`
 }
 
 type OptimizerConfig struct {
@@ -77,20 +77,17 @@ func SaveModel(model ModelInterface, filePath string) error {
 	}
 
 	if model.GetOptimizer() != nil {
-		optimizerConfig := getOptimizerConfig(model.GetOptimizer())
-		modelConfig.Optimizer = optimizerConfig
+		modelConfig.Optimizer = getOptimizerConfig(model.GetOptimizer())
 	}
 
 	for i, l := range model.GetLayers() {
 		layerType := reflect.TypeOf(l).Elem().Name()
-		layerConfig := LayerConfig{
-			Type: layerType,
-		}
+		layerConfig := LayerConfig{Type: layerType}
 
 		switch typedLayer := l.(type) {
 		case *layer.Linear:
-			wData, wShape := tensorDenseToSerializable(typedLayer.GetWeights())
-			bData, bShape := tensorDenseToSerializable(typedLayer.GetBiases())
+			wData, wShape := matDenseToSerializable(typedLayer.GetWeights())
+			bData, bShape := matDenseToSerializable(typedLayer.GetBiases())
 			if len(wShape) == 2 {
 				layerConfig.InFeatures = wShape[0]
 				layerConfig.OutFeatures = wShape[1]
@@ -103,15 +100,12 @@ func SaveModel(model ModelInterface, filePath string) error {
 			layerConfig.Alpha = typedLayer.Alpha
 		case *layer.Dropout:
 			layerConfig.DropoutRate = typedLayer.DropoutRate
-		case *layer.ReLU, *layer.Sigmoid, *layer.Softmax, *layer.SiLU, *layer.Flatten:
-			// No parameters to save
 		}
 
 		modelConfig.Layers[i] = layerConfig
 	}
 
-	dirPath := filepath.Dir(filePath)
-	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create directory: %v", err)
 	}
 
@@ -121,11 +115,9 @@ func SaveModel(model ModelInterface, filePath string) error {
 	}
 	defer f.Close()
 
-	encoder := gob.NewEncoder(f)
-	if err := encoder.Encode(modelConfig); err != nil {
+	if err := gob.NewEncoder(f).Encode(modelConfig); err != nil {
 		return fmt.Errorf("failed to encode model configuration: %v", err)
 	}
-
 	return nil
 }
 
@@ -146,32 +138,28 @@ func LoadModelData(filePath string) (*ModelData, error) {
 	defer f.Close()
 
 	var modelConfig ModelConfig
-	decoder := gob.NewDecoder(f)
-	if err := decoder.Decode(&modelConfig); err != nil {
+	if err := gob.NewDecoder(f).Decode(&modelConfig); err != nil {
 		return nil, fmt.Errorf("failed to decode model configuration: %v", err)
 	}
 
-	modelData := &ModelData{
-		Layers: make([]layer.Layer, 0, len(modelConfig.Layers)),
-	}
+	modelData := &ModelData{Layers: make([]layer.Layer, 0, len(modelConfig.Layers))}
 
-	for _, layerConfig := range modelConfig.Layers {
+	for _, cfg := range modelConfig.Layers {
 		var newLayer layer.Layer
-
-		switch layerConfig.Type {
+		switch cfg.Type {
 		case "Linear":
-			linear := layer.NewLinear(layerConfig.InFeatures, layerConfig.OutFeatures)
-			if layerConfig.Weights != nil && len(layerConfig.WeightShape) > 0 {
-				linear.UpdateWeights(serializableToTensorDense(layerConfig.Weights, layerConfig.WeightShape))
+			linear := layer.NewLinear(cfg.InFeatures, cfg.OutFeatures)
+			if cfg.Weights != nil && len(cfg.WeightShape) > 0 {
+				linear.UpdateWeights(serializableToMatDense(cfg.Weights, cfg.WeightShape))
 			}
-			if layerConfig.Biases != nil && len(layerConfig.BiasShape) > 0 {
-				linear.UpdateBiases(serializableToTensorDense(layerConfig.Biases, layerConfig.BiasShape))
+			if cfg.Biases != nil && len(cfg.BiasShape) > 0 {
+				linear.UpdateBiases(serializableToMatDense(cfg.Biases, cfg.BiasShape))
 			}
 			newLayer = linear
 		case "Flatten":
 			newLayer = layer.NewFlatten()
 		case "LeakyReLU":
-			newLayer = layer.NewLeakyReLU(layerConfig.Alpha)
+			newLayer = layer.NewLeakyReLU(cfg.Alpha)
 		case "ReLU":
 			newLayer = layer.NewReLU()
 		case "Sigmoid":
@@ -181,29 +169,23 @@ func LoadModelData(filePath string) (*ModelData, error) {
 		case "SiLU":
 			newLayer = layer.NewSiLU()
 		case "Dropout":
-			newLayer = layer.NewDropout(layerConfig.DropoutRate)
+			newLayer = layer.NewDropout(cfg.DropoutRate)
 		default:
-			return nil, fmt.Errorf("unsupported layer type: %s", layerConfig.Type)
+			return nil, fmt.Errorf("unsupported layer type: %s", cfg.Type)
 		}
-
 		modelData.Layers = append(modelData.Layers, newLayer)
 	}
 
 	if modelConfig.Optimizer.Type != "" {
-		opt := createOptimizer(modelConfig.Optimizer)
-		if opt != nil {
+		if opt := createOptimizer(modelConfig.Optimizer); opt != nil {
 			modelData.Optimizer = opt
 		}
 	}
-
 	return modelData, nil
 }
 
 func getOptimizerConfig(opt optimizer.Optimizer) OptimizerConfig {
-	config := OptimizerConfig{
-		LR: opt.GetLearningRate(),
-	}
-
+	config := OptimizerConfig{LR: opt.GetLearningRate()}
 	switch o := opt.(type) {
 	case *optimizer.Adam:
 		config.Type = "Adam"
@@ -216,7 +198,6 @@ func getOptimizerConfig(opt optimizer.Optimizer) OptimizerConfig {
 	case *optimizer.SGD:
 		config.Type = "SGD"
 	}
-
 	return config
 }
 
@@ -228,7 +209,6 @@ func createOptimizer(config OptimizerConfig) optimizer.Optimizer {
 		return optimizer.NewSGDMomentum(config.LR, config.Momentum)
 	case "SGD":
 		return optimizer.NewSGD(config.LR)
-	default:
-		return nil
 	}
+	return nil
 }

@@ -1,24 +1,20 @@
 package layer
 
-import (
-	"gorgonia.org/tensor"
-)
+import "gonum.org/v1/gonum/mat"
 
 // ReLU implements Rectified Linear Unit activation: f(x) = max(0, x)
 type ReLU struct {
-	input *tensor.Dense // cached input for gradient computation
+	input *mat.Dense
 }
 
-// NewReLU creates a new ReLU activation layer
 func NewReLU() *ReLU {
 	return &ReLU{}
 }
 
-// Forward applies ReLU activation element-wise
-func (r *ReLU) Forward(x *tensor.Dense) *tensor.Dense {
+func (r *ReLU) Forward(x *mat.Dense) *mat.Dense {
 	r.input = x
-	result := x.Clone().(*tensor.Dense)
-	data := result.Data().([]float64)
+	result := mat.DenseCopyOf(x)
+	data := result.RawMatrix().Data
 	for i, v := range data {
 		if v < 0 {
 			data[i] = 0
@@ -27,30 +23,23 @@ func (r *ReLU) Forward(x *tensor.Dense) *tensor.Dense {
 	return result
 }
 
-// Backward computes ReLU gradient: 1 if input > 0, else 0
-func (r *ReLU) Backward(gradOutput *tensor.Dense) *tensor.Dense {
-	grad := r.input.Clone().(*tensor.Dense)
-	inputData := grad.Data().([]float64)
+func (r *ReLU) Backward(gradOutput *mat.Dense) *mat.Dense {
+	rows, cols := r.input.Dims()
+	inputData := r.input.RawMatrix().Data
+	gradData := gradOutput.RawMatrix().Data
+	resultData := make([]float64, rows*cols)
 	for i, v := range inputData {
 		if v > 0 {
-			inputData[i] = 1.0
-		} else {
-			inputData[i] = 0.0
+			resultData[i] = gradData[i]
 		}
 	}
-
-	result, _ := tensor.Mul(grad, gradOutput)
-	return result.(*tensor.Dense)
+	return mat.NewDense(rows, cols, resultData)
 }
 
-func (r *ReLU) GetWeights() *tensor.Dense                 { return nil }
-func (r *ReLU) GetGradients() *tensor.Dense               { return nil }
-func (r *ReLU) UpdateWeights(weightsUpdate *tensor.Dense) {}
-func (r *ReLU) GetBiases() *tensor.Dense                  { return nil }
-func (r *ReLU) GetBiasGradients() *tensor.Dense           { return nil }
-func (r *ReLU) UpdateBiases(biasUpdate *tensor.Dense)     {}
-
-// ClearCache releases cached input to prevent memory leaks
-func (r *ReLU) ClearCache() {
-	r.input = nil
-}
+func (r *ReLU) GetWeights() *mat.Dense       { return nil }
+func (r *ReLU) GetGradients() *mat.Dense     { return nil }
+func (r *ReLU) UpdateWeights(w *mat.Dense)   {}
+func (r *ReLU) GetBiases() *mat.Dense        { return nil }
+func (r *ReLU) GetBiasGradients() *mat.Dense { return nil }
+func (r *ReLU) UpdateBiases(b *mat.Dense)    {}
+func (r *ReLU) ClearCache()                  { r.input = nil }
